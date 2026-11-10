@@ -21,7 +21,12 @@
 #include "ps3emu/guest_call.h"
 #include <stdio.h>
 #include <stdlib.h>
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include "platform/win32_compat.h"   /* LONG/EXCEPTION_EXECUTE_HANDLER and friends */
+#include <execinfo.h>                /* backtrace() for tj_capture_bt */
+#endif
 #include <string.h>
 #include <map>
 #include <new>
@@ -1149,6 +1154,18 @@ void tj_survival_fade_state_trace(ppu_context* ctx, uint32_t fade_ea,
     have_previous[site] = true;
 }
 
+/* Host backtrace for the crash dumps: Win32 walks the stack natively; POSIX
+ * hosts use glibc's backtrace(3), which needs no frame pointers because it
+ * falls back to dwarf unwinding. */
+static unsigned tj_capture_bt(void** bt, unsigned max)
+{
+#ifdef _WIN32
+    return RtlCaptureStackBackTrace(0, max, bt, 0);
+#else
+    return (unsigned)backtrace(bt, (int)max);
+#endif
+}
+
 void tj_crt_skip(ppu_context* ctx, const char* what)
 {
     static int hits;
@@ -1456,7 +1473,7 @@ void tj_abort(ppu_context* ctx)
     }
 
     void* bt[64];
-    unsigned short n = RtlCaptureStackBackTrace(0, 64, bt, 0);
+    unsigned short n = (unsigned short)tj_capture_bt(bt, 64);
     fprintf(stderr, "[TJ] guest chain (resolved from the host stack):\n");
     for (unsigned short i = 0; i < n; i++) {
         uintptr_t off = 0;
@@ -1542,7 +1559,7 @@ extern "C" int tj_crash_filter(unsigned long code, void* exception_info)
                 (unsigned long long)host_off);
     }
     void* bt[64];
-    unsigned short n = RtlCaptureStackBackTrace(0, 64, bt, 0);
+    unsigned short n = (unsigned short)tj_capture_bt(bt, 64);
     fprintf(stderr, "\n[TJ] fault 0x%08lX -- guest chain:\n", code);
     for (unsigned short i = 0; i < n; i++) {
         if (i < 24)

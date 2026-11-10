@@ -282,6 +282,7 @@ add_executable(tokyojungle
     src/tj_rsx_reference.cpp
     src/stubs.cpp
     src/dispatch_glue.cpp
+    src/fiber_compat.cpp     # SPURS-era cellFiber PPU names -> current cellFiber HLE
     src/tj_crt_overrides.cpp
     src/tj_prompt_text.cpp        # PC key names in game text (post_lift hook)
     src/tj_pamf_media.cpp
@@ -305,7 +306,6 @@ endif()
 target_include_directories(tokyojungle PRIVATE
     # Our bridge header and game-specific code
     ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/src/compat   # <dirent.h>/<unistd.h> Win32 shims for ppu_fs.cpp
     # Generated code directory (ppu_recomp.h lives here)
     ${CMAKE_SOURCE_DIR}/generated
     # ps3recomp public headers (ps3emu/*.h)
@@ -313,9 +313,22 @@ target_include_directories(tokyojungle PRIVATE
     # ps3recomp runtime internal headers (ppu_context.h, ppu_memory.h, etc.)
     ${PS3RECOMP_DIR}/runtime/ppu
     ${PS3RECOMP_DIR}/runtime/memory
+    # platform/win32_compat.h (Win32 sync+timing API on POSIX hosts)
+    ${PS3RECOMP_DIR}/runtime
     # LV2 syscall dispatch
     ${PS3RECOMP_DIR}/runtime/syscalls
+    # libs/spurs HLE public headers (cellFiber.h) for src/fiber_compat.cpp
+    ${PS3RECOMP_DIR}/libs/spurs
 )
+
+# Win32 <dirent.h>/<unistd.h> shims for ppu_fs.cpp and the ps3recomp runtime.
+# Keep these off the search path on POSIX: the system headers win there, and
+# shadowing <unistd.h> with the shim breaks e.g. ppu_loader.cpp's <io.h> include.
+if(WIN32)
+    target_include_directories(tokyojungle PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/compat
+    )
+endif()
 
 target_link_libraries(tokyojungle PRIVATE
     ps3recomp_runtime

@@ -26,7 +26,10 @@ from nid_database import get_default_db
 ELF = 'input/EBOOT.ELF'
 SRC = 'src/hle_imports.h'
 DESC_MAGIC = 0x2C000001
-NAME_LO, NAME_HI = 0x0025FD20, 0x0025FE9C
+# Module-name table of the JP disc (BCJS30069): the 24 SCE module descriptor
+# strings ("cellGcmSys", "sysPrxForUser", ...) between these addresses. The
+# descriptor's +0x10 name pointer must land inside this range.
+NAME_LO, NAME_HI = 0x0025E2A0, 0x0025E420
 
 # HLE_ADDR_<suffix> -> the library function it implements.
 HANDLERS = {
