@@ -58,22 +58,52 @@ static void tj_dump_threads(void)
 }
 
 extern "C" {
-int  rsx_d3d12_backend_init(int width, int height, const char* title);
-void rsx_d3d12_backend_present(void);
-int  rsx_d3d12_backend_pump_messages(void);
 void cellGcmTickVBlank(void);
 void cellGcmTickFlip(void);
 void cellGcm_rsx_process_fifo(void);
 int  cellGcm_take_flip_pending(void);
 }
 
+/* Render backend, same selection ps3recomp's own host (runtime/host/host_posix.c)
+ * and project template make: D3D12 on Windows, Vulkan on Linux when the runtime
+ * is configured with -DPS3RECOMP_RSX_VULKAN=ON, and the headless null backend
+ * everywhere else. All three expose the same three entry points. This matters
+ * beyond pixels: cellGcm_rsx_process_fifo() is only driven when the backend is
+ * up, and the fences it publishes are what ctrl->ref advances -- with no
+ * backend the guest's first `while (ctrl->ref != put) usleep(30);` never ends. */
+#if defined(_WIN32)
+extern "C" int  rsx_d3d12_backend_init(int w, int h, const char* title);
+extern "C" void rsx_d3d12_backend_present(void);
+extern "C" int  rsx_d3d12_backend_pump_messages(void);
+#  define rsx_backend_init    rsx_d3d12_backend_init
+#  define rsx_backend_present rsx_d3d12_backend_present
+#  define rsx_backend_pump    rsx_d3d12_backend_pump_messages
+#  define RSX_BACKEND_NAME    "D3D12"
+#elif defined(PS3RECOMP_RSX_VULKAN)
+extern "C" int  rsx_vulkan_backend_init(uint32_t w, uint32_t h, const char* title);
+extern "C" void rsx_vulkan_backend_present(void);
+extern "C" int  rsx_vulkan_backend_pump_messages(void);
+#  define rsx_backend_init    rsx_vulkan_backend_init
+#  define rsx_backend_present rsx_vulkan_backend_present
+#  define rsx_backend_pump    rsx_vulkan_backend_pump_messages
+#  define RSX_BACKEND_NAME    "Vulkan"
+#else
+extern "C" int  rsx_null_backend_init(uint32_t w, uint32_t h, const char* title);
+extern "C" void rsx_null_backend_present(void);
+extern "C" int  rsx_null_backend_pump_messages(void);
+#  define rsx_backend_init    rsx_null_backend_init
+#  define rsx_backend_present rsx_null_backend_present
+#  define rsx_backend_pump    rsx_null_backend_pump_messages
+#  define RSX_BACKEND_NAME    "null (headless software)"
+#endif
+
 static DWORD WINAPI tj_present_thread(LPVOID)
 {
     const char* title = getenv("PS3_TITLE");
     if (!title || !*title) title = "Tokyo Jungle (ps3recomp)";
 
-    int rsx_ok = (rsx_d3d12_backend_init(1280, 720, title) == 0);
-    fprintf(stderr, "[rsx] backend init %s\n",
+    int rsx_ok = (rsx_backend_init(1280, 720, title) == 0);
+    fprintf(stderr, "[rsx] " RSX_BACKEND_NAME " backend init %s\n",
             rsx_ok ? "OK -- window open" : "FAILED");
 
     ULONGLONG next_tick = GetTickCount64();
@@ -102,7 +132,7 @@ static DWORD WINAPI tj_present_thread(LPVOID)
             cellGcmTickVBlank();
             cellGcmTickFlip();
             if (rsx_ok && cellGcm_take_flip_pending())
-                rsx_d3d12_backend_present();
+                rsx_backend_present();
             if (rsx_ok)
                 cellGcm_rsx_process_fifo();
             next_tick += 16;          /* ~60 Hz */
@@ -118,9 +148,9 @@ static DWORD WINAPI tj_present_thread(LPVOID)
 
         if (rsx_ok) {
             if (cellGcm_take_flip_pending())
-                rsx_d3d12_backend_present();
+                rsx_backend_present();
             cellGcm_rsx_process_fifo();
-            if (rsx_d3d12_backend_pump_messages() != 0)
+            if (rsx_backend_pump() != 0)
                 rsx_ok = 0;           /* window closed */
         }
     }
