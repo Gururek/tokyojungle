@@ -94,7 +94,11 @@ extern "C" {
     void cellDmuxPeekAu(void);
     void cellDmuxReleaseAu(void);
     void cellDmuxFlushEs(void);
+#ifndef PS3RECOMP_CELLFIBER_H
+#ifndef PS3RECOMP_CELLFIBER_H
     void cellFiberPpuCreateFiber(void);
+#endif
+#endif
     void cellFontInit(void);
     void cellFontEnd(void);
     void cellFontOpenFontFile(void);

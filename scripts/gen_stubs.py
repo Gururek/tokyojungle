@@ -100,6 +100,22 @@ def regen_header(src_path):
     decls = '\n'.join(f'void {fn}(ppu_context* ctx);'
                       for fn in sorted(referenced))
 
+    # The lifter preamble opens an `extern "C" {` for the `func_*` declarations
+    # it emits and we cut the splice at the first of those, so the prefix handed
+    # to us ends inside an open block. gen_stubs used to append its own
+    # `extern "C" { ... }` on top, which left the header with one block open:
+    # every declaration in headers included *after* generated/ppu_recomp.h
+    # (ppu_memory.h, ppu_context.h in ppu_sysprx.cpp/ppu_fs.cpp/ppu_loader.cpp)
+    # inherited C linkage, so ppu_memory.h's `static inline` definitions
+    # collided with the header's C-linkage declarations --
+    # "conflicting declaration of 'uint32_t vm_read32_inl(uint64_t)' with 'C'
+    # linkage". Balance the prefix's blocks before adding our own.
+    n_open = prefix.count('extern "C" {')
+    n_close = len(re.findall(r'#ifdef __cplusplus\n\}\n#endif', prefix))
+    if n_open > n_close:
+        prefix = prefix.rstrip() + '\n' + ('#ifdef __cplusplus\n}\n#endif\n'
+                                          * (n_open - n_close)) + '\n'
+
     content = ('/* Patched header */\n'
                '#pragma once\n'
                '#include "recomp_bridge.h"   /* ppu_context, func_entry, hle_dispatch_entry_t */\n'
@@ -479,11 +495,82 @@ void func_00010200(ppu_context* ctx) {
     print(f"  Generated ppu_stubs.c ({len(CRT_OVERRIDES)} overrides)")
 
 
+def split_source(src_path, parts):
+    """Split the merged lifted source into `parts` translation units.
+
+    The lifter emits ppu_recomp_NNN.cpp precisely so a build can compile them
+    in parallel (its own comment: "splitting also lets the build compile chunks
+    in parallel"), but the merged single TU is what Ninja sees today: one
+    42 MB cc1plus job on one core while fifteen cores idle. Splitting it back
+    up is the whole build-time win -- ~8 min of guest-code compile becomes
+    ~1.5 min of wall clock at -j16, and a one-function edit costs one chunk.
+
+    Layout: the preamble (lifter includes + `static inline` PPC helpers, the
+    part merge_chunks splices) is written once to ppu_recomp_preamble.h and
+    included by every chunk. `function_table[]` moves to its own TU, which is
+    the only one that has to be recompiled when the function list changes. The
+    naming round-trips through merge_chunks: a rerun merges them back to the
+    identical text, so every other pass stays idempotent.
+    """
+    with open(src_path, 'r') as f:
+        text = f.read()
+
+    head = text.find('\nvoid func_')
+    if head < 0:
+        print("  WARNING: no lifted functions found; leaving the single TU alone")
+        return
+    preamble, body = text[:head], text[head:]
+
+    tstart = body.find('const func_entry function_table[] = {')
+    table = ''
+    if tstart >= 0:
+        table, body = body[tstart:], body[:tstart]
+
+    funcs = re.split(r'(?=\nvoid func_)', body)
+    target = max(1, len(body) // max(1, parts))
+    buckets, cur, nbytes = [], [], 0
+    for fn in funcs:
+        cur.append(fn)
+        nbytes += len(fn)
+        if nbytes >= target and len(buckets) < parts - 1:
+            buckets.append(''.join(cur))
+            cur, nbytes = [], 0
+    if cur:
+        buckets.append(''.join(cur))
+
+    with open('generated/ppu_recomp_preamble.h', 'w') as f:
+        f.write(preamble)
+
+    written = []
+    for i, bucket in enumerate(buckets):
+        path = f'generated/ppu_recomp_{i:03d}.cpp'
+        with open(path, 'w') as f:
+            if i == 0:
+                f.write(preamble)
+            else:
+                f.write('#include "ppu_recomp_preamble.h"\n')
+            f.write(bucket)
+        written.append(path)
+    if table:
+        path = 'generated/ppu_recomp_999.cpp'
+        with open(path, 'w') as f:
+            f.write('#include "ppu_recomp.h"   /* func_entry, the func_* decls */\n')
+            f.write(table)
+        written.append(path)
+
+    os.remove(src_path)
+    print(f"  Split {len(text)/1e6:.1f} MB into {len(written)} TU(s) "
+          f"(preamble + function_table hoisted) -> {', '.join(w[10:] for w in written[:3])}...")
+
+
 def main():
     global TOC_VALUE
     parser = argparse.ArgumentParser(description='Post-lift processing for Tokyo Jungle')
     parser.add_argument('--toc', default=f'0x{TOC_VALUE:08X}',
                         help='TOC value (default: 0x00359220)')
+    parser.add_argument('--tus', type=int, default=8,
+                        help='number of translation units to split the lifted PPU source into '
+                             '(0 = keep the single merged TU; default 8)')
     args = parser.parse_args()
 
     TOC_VALUE = int(args.toc, 16)
@@ -507,6 +594,10 @@ def main():
 
     print("[6/6] Generating missing-symbol stubs...")
     gen_missing_stubs(src_path)
+
+    if args.tus:
+        print(f"[7/7] Splitting the lifted source into {args.tus} parallel TU(s)...")
+        split_source(src_path, args.tus)
 
     print("\n=== Done! Run: cmake --build build --config Release ===")
 

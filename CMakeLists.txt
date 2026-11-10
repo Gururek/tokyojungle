@@ -28,13 +28,13 @@ add_subdirectory(${PS3RECOMP_DIR} ps3recomp EXCLUDE_FROM_ALL)
 target_compile_definitions(ps3recomp_runtime PRIVATE
     PS3RECOMP_SPU_DMA_IMAGE17_CALLBACK
     PS3RECOMP_SPU_MAIN_WRITE_GATE)
-/* PC key prompts: key-cap art (libs/input/pad_prompt_art.c) and the UI-atlas
- * patcher (libs/video/rsx_prompt_atlas.c) compile only with this define; the
- * D3D12 backend then swaps the known button atlases at record time. Runtime
- * switch: TJ_PROMPTS=0 shows the original PS3 prompts.
- *
- * The key-cap renderer is GDI (the upstream key-map reader reads the registry),
- * so on POSIX hosts the prompts are the game's own PS3 glyphs for now. */
+# PC key prompts: key-cap art (libs/input/pad_prompt_art.c) and the UI-atlas
+# patcher (libs/video/rsx_prompt_atlas.c) compile only with this define; the
+# D3D12 backend then swaps the known button atlases at record time. Runtime
+# switch: TJ_PROMPTS=0 shows the original PS3 prompts.
+#
+# The key-cap renderer is GDI (the upstream key-map reader reads the registry),
+# so on POSIX hosts the prompts are the game's own PS3 glyphs for now.
 if(WIN32)
     target_compile_definitions(ps3recomp_runtime PRIVATE
         PS3RECOMP_PROMPT_ART)
@@ -97,6 +97,18 @@ set(PS3RECOMP_PPU_SOURCES
     "${PS3RECOMP_DIR}/runtime/ppu/ppu_sysprx.cpp"   # boot-critical CRT
     "${PS3RECOMP_DIR}/runtime/ppu/ppu_fs.cpp"       # cellFs VFS
 )
+
+# The lifted header defines vm_read32(a) as vm_read32_inl(a) (the direct
+# bounds-checked access for code outside a lifted function). MSVC and clang-cl
+# compile the runtime's out-of-line definitions through that macro -- the
+# definition of `uint8_t vm_read8(uint64_t a)` lands on the `_inl` name and
+# coexists with the header's inline copy. GCC 16 rejects the pair as a
+# redefinition, so the four runtime PPU TUs keep the plain accessor names on
+# every host and lose only the inline fast path in the HLE/VFS layer.
+if(NOT MSVC AND NOT APPLE)
+    set_source_files_properties(${PS3RECOMP_PPU_SOURCES} PROPERTIES
+        COMPILE_DEFINITIONS "PPU_NO_INLINE_LOADS;PPU_NO_INLINE_STORES")
+endif()
 
 # Lifted SPU images + workload registration. The runtime's SPURS job dispatcher
 # matches a guest SPU image by content fingerprint and runs the lifted entry;
@@ -352,12 +364,16 @@ endif()
 # The lifted PPU translation unit spells register/vector alignment with MSVC's
 # __declspec(align(16)) and the loader uses __declspec(thread); clang accepts
 # both with -fdeclspec.
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT MSVC)
-    target_compile_options(tokyojungle PRIVATE -fdeclspec)
+# Clang needs -fdeclspec to accept MSVC's __declspec. GCC's C++ front end
+# accepts it unprefixed, and its C driver has no such flag; ps3recomp's
+# win32_compat.h maps __declspec onto __attribute__ there.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(tokyojungle PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fdeclspec>)
 endif()
-if(CMAKE_C_COMPILER_ID MATCHES "Clang" AND NOT MSVC)
-    target_compile_options(tokyojungle PRIVATE -fdeclspec)
+if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+    target_compile_options(tokyojungle PRIVATE $<$<COMPILE_LANGUAGE:C>:-fdeclspec>)
 endif()
+
 target_compile_definitions(tokyojungle PRIVATE PS3RECOMP_SPU_MAIN_WRITE_GATE)
 
 if(PS3RECOMP_BUILD_TESTS)

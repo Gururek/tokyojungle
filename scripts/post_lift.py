@@ -78,6 +78,11 @@ HEAP_PATCHES = {
     # that is wrong. See src/tj_crt_overrides.cpp.
     "0023E380": ("tj_abort",        "abort"),   # NA
     "0023C920": ("tj_abort",        "abort"),   # JP
+    # The JP abort on BCJS30069 is the one that allocates a report buffer
+    # (sys_mmapper 0x3DC), sleeps (0x193) and walks its own stack to print
+    # "abort() is called from 0x..." + "Continue... (Lv-2 is still running.)".
+    # 0023C920 is its stack-walker callee.
+    "0023CA80": ("tj_abort",        "abort"),   # JP (the reporter)
     "0025279C": ("tj_pure_virtual", "__cxa_pure_virtual"),
 }
 
