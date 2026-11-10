@@ -28,12 +28,17 @@ add_subdirectory(${PS3RECOMP_DIR} ps3recomp EXCLUDE_FROM_ALL)
 target_compile_definitions(ps3recomp_runtime PRIVATE
     PS3RECOMP_SPU_DMA_IMAGE17_CALLBACK
     PS3RECOMP_SPU_MAIN_WRITE_GATE)
-# PC key prompts: key-cap art (libs/input/pad_prompt_art.c) and the UI-atlas
-# patcher (libs/video/rsx_prompt_atlas.c) compile only with this define; the
-# D3D12 backend then swaps the known button atlases at record time. Runtime
-# switch: TJ_PROMPTS=0 shows the original PS3 prompts.
-target_compile_definitions(ps3recomp_runtime PRIVATE
-    PS3RECOMP_PROMPT_ART)
+/* PC key prompts: key-cap art (libs/input/pad_prompt_art.c) and the UI-atlas
+ * patcher (libs/video/rsx_prompt_atlas.c) compile only with this define; the
+ * D3D12 backend then swaps the known button atlases at record time. Runtime
+ * switch: TJ_PROMPTS=0 shows the original PS3 prompts.
+ *
+ * The key-cap renderer is GDI (the upstream key-map reader reads the registry),
+ * so on POSIX hosts the prompts are the game's own PS3 glyphs for now. */
+if(WIN32)
+    target_compile_definitions(ps3recomp_runtime PRIVATE
+        PS3RECOMP_PROMPT_ART)
+endif()
 
 # =============================================================================
 # Generated recompiled code
@@ -282,7 +287,6 @@ add_executable(tokyojungle
     src/tj_rsx_reference.cpp
     src/stubs.cpp
     src/dispatch_glue.cpp
-    src/fiber_compat.cpp     # SPURS-era cellFiber PPU names -> current cellFiber HLE
     src/tj_crt_overrides.cpp
     src/tj_prompt_text.cpp        # PC key names in game text (post_lift hook)
     src/tj_pamf_media.cpp
@@ -333,6 +337,27 @@ endif()
 target_link_libraries(tokyojungle PRIVATE
     ps3recomp_runtime
 )
+
+# POSIX: the title-side code (and the lifted PPU translation unit) are written
+# against the Win32 API; ps3recomp's compat layer implements it on pthreads.
+# Force-include so every TU sees the same declarations. _GNU_SOURCE has to come
+# with it: the compat header is included before each .c's own feature macros.
+if(NOT WIN32)
+    target_compile_definitions(tokyojungle PRIVATE _GNU_SOURCE)
+    target_compile_options(tokyojungle PRIVATE
+        -include "${PS3RECOMP_DIR}/runtime/platform/win32_compat.h"
+    )
+endif()
+
+# The lifted PPU translation unit spells register/vector alignment with MSVC's
+# __declspec(align(16)) and the loader uses __declspec(thread); clang accepts
+# both with -fdeclspec.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND NOT MSVC)
+    target_compile_options(tokyojungle PRIVATE -fdeclspec)
+endif()
+if(CMAKE_C_COMPILER_ID MATCHES "Clang" AND NOT MSVC)
+    target_compile_options(tokyojungle PRIVATE -fdeclspec)
+endif()
 target_compile_definitions(tokyojungle PRIVATE PS3RECOMP_SPU_MAIN_WRITE_GATE)
 
 if(PS3RECOMP_BUILD_TESTS)
