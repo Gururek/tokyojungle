@@ -36,8 +36,10 @@
  * -----------------------------------------------------------------------*/
 
 /* Defined by the runtime (ppu_loader.cpp) now that this target compiles it;
- * we only reference it here. */
-extern "C" __declspec(thread) void (*g_trampoline_fn)(void*);
+ * we only reference it here. PPU_THREAD_LOCAL is ps3recomp's spelling of the
+ * TLS keyword (`__declspec(thread)` on MSVC, `__thread` on POSIX) -- matching
+ * it keeps this declaration ABI-identical to the definition. */
+extern "C" PPU_THREAD_LOCAL void (*g_trampoline_fn)(void*);
 
 /* ---------------------------------------------------------------------------
  * Indirect call dispatch
@@ -159,7 +161,11 @@ extern "C" void tj_install_guest_caller(void)
  * it's plenty.
  * -----------------------------------------------------------------------*/
 
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include "platform/win32_compat.h"   /* HANDLE/DWORD WINAPI/Sleep/GetTickCount64 */
+#endif
 
 extern "C" const char* g_hle_inflight[];   /* ppu_hle.cpp: in-flight HLE per guest thread */
 extern "C" uint32_t    g_sc_inflight[];   /* ppu_loader.cpp: in-flight lv2 syscall */

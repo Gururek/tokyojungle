@@ -20,7 +20,11 @@
  */
 #include <stdio.h>
 #include <stdlib.h>
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include "platform/win32_compat.h"   /* ULONGLONG/GetTickCount64/Sleep/DWORD WINAPI */
+#endif
 
 #include "ppu_context.h"
 #include "recomp_bridge.h"   /* vm_write64 (diagnostic clock tick) */

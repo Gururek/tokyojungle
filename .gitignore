@@ -70,3 +70,10 @@ trap.log
 
 # CELLMARK_DUMP output
 frame_*.bmp
+
+# bring-up run logs
+*.log
+logs/
+
+# local tooling
+.tools/

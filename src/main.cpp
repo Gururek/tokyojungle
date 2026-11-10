@@ -12,6 +12,11 @@
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#else
+#include <signal.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#include "platform/win32_compat.h"   /* Sleep/GetTickCount64 used by the scaffold */
 #endif
 
 // ps3recomp public headers
@@ -99,6 +104,59 @@ extern "C" void ppu_install_thread_trampoline(void);
 extern "C" void cellfs_set_root_path(const char* root);
 extern "C" void cellfs_add_path_mapping(const char* ps3_prefix, const char* host_path);
 
+#ifndef _WIN32
+/* ---------------------------------------------------------------------------
+ * POSIX equivalents of the two Win32 crash/commit hooks below.
+ *
+ * vm_init() (runtime/memory/vm.h) maps the whole 4 GB guest window PROT_NONE
+ * and mprotects only the main-memory and stack regions, so a guest touch
+ * outside those faults exactly like an uncommitted page on Windows. A SIGSEGV
+ * handler mprotects the 64 KB guest page and returns; the faulting instruction
+ * then re-executes against real memory, which is the POSIX shape of the VEH's
+ * VirtualAlloc(MEM_COMMIT) + EXCEPTION_CONTINUE_EXECUTION.
+ *
+ * SA_ONSTACK + an alternate stack: a guest stack overflow faults with r1 at the
+ * bottom of the guest stack region, and the handler needs a stack of its own.
+ * -----------------------------------------------------------------------*/
+static void tj_sigsegv(int sig, siginfo_t* si, void*)
+{
+    extern uint8_t* vm_base;
+    uintptr_t at = (uintptr_t)si->si_addr;
+    if (vm_base && at >= (uintptr_t)vm_base &&
+        at < (uintptr_t)vm_base + 0x100000000ull) {
+        void* page = (void*)(at & ~(uintptr_t)0xFFFF);
+        if (mprotect(page, 0x10000, PROT_READ | PROT_WRITE) == 0) {
+            static int n = 0;
+            if (++n <= 24)
+                fprintf(stderr, "[TJ] faulted in guest page 0x%08X (%s) -- committed\n",
+                        (uint32_t)((uintptr_t)page - (uintptr_t)vm_base),
+                        si->si_code == SEGV_ACCERR ? "write" : "read");
+            return;                       /* re-execute the faulting access */
+        }
+    }
+    fflush(stdout);
+    fflush(stderr);
+    extern int tj_crash_filter(unsigned long code);
+    tj_crash_filter((unsigned long)sig);
+    _exit(1);
+}
+
+static void tj_install_posix_signals(void)
+{
+    /* SIGSTKSZ is a sysconf() call on glibc, so it cannot size a static array. */
+    static char altstack[256 * 1024];
+    stack_t ss = { altstack, 0, sizeof altstack };
+    sigaltstack(&ss, NULL);
+
+    struct sigaction sa = {};
+    sa.sa_sigaction = tj_sigsegv;
+    sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
+}
+#endif /* !_WIN32 */
+
 int main(int argc, char* argv[])
 {
     /* The HLE libraries log with printf (stdout) while the guest tty and the
@@ -138,6 +196,7 @@ int main(int argc, char* argv[])
      * are logged, because a page the guest touches that nothing ever allocated
      * is still worth knowing about -- this makes it survivable, not invisible. */
     if (!getenv("TJ_NO_FAULT_COMMIT"))
+#ifdef _WIN32
     AddVectoredExceptionHandler(1, [](EXCEPTION_POINTERS* ep) -> LONG {
         const EXCEPTION_RECORD* er = ep->ExceptionRecord;
         if (er->ExceptionCode != EXCEPTION_ACCESS_VIOLATION ||
@@ -182,6 +241,9 @@ int main(int argc, char* argv[])
         tj_crash_filter(er->ExceptionCode);
         return EXCEPTION_EXECUTE_HANDLER;
     });
+#else
+    tj_install_posix_signals();
+#endif
     // Force unbuffered stdout for crash debugging
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);

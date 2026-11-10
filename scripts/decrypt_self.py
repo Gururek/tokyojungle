@@ -98,6 +98,11 @@ SELF_KEYS = {
         bytes.fromhex("7D50B8B0F4C4A67721BF80A5C233439304A2D96B4E06EF1A8C0FDB4B3DCA69A0"),
         bytes.fromhex("21D0FDA2CE4F71C04CFE1F2E5CC25B33"),
     ),
+    # Key revision 0x19 (self:app:19, ver 4.11) — Tokyo Jungle JP disc (BCJS30069)
+    0x19: (
+        bytes.fromhex("3236B9937174DF1DC12EC2DD8A318A0EA4D3ECDEA5DFB4AC1B8278447000C297"),
+        bytes.fromhex("6153DEE781B8ADDC6A439498B816DC46"),
+    ),
 }
 
 # Fallback: well-known key set for key_rev 0x16, app_type 1
@@ -404,9 +409,9 @@ def decrypt_self(self_data, klicensee=None):
     # +24: unknown (u32)
     # +28: unknown (u32)
     sign_input_len = be64(dec_cert, 0)
-    section_count = be32(dec_cert, 12)
-    key_count = be32(dec_cert, 16)
-    opt_hdr_size = be32(dec_cert, 20)
+    section_count = be32(dec_cert, 0x0C)
+    key_count = be32(dec_cert, 0x10)
+    opt_hdr_size = be32(dec_cert, 0x14)
 
     print(f"\n  Certification Header:")
     print(f"    Sections: {section_count}")
@@ -418,27 +423,42 @@ def decrypt_self(self_data, klicensee=None):
         print("  Falling back to raw segment extraction...")
         return build_elf_raw(sf, self_data)
 
-    # Segment Certification entries (0x20 each, after cert header at +0x20)
+    # Segment Certification entries. RPCS3's MetadataSectionHeader (rpcs3/Crypto/
+    # unself.h) is 0x30 bytes and the entries follow the 0x20-byte MetadataHeader:
+    #   +0x00 u64 data_offset   absolute file offset of the segment data
+    #   +0x08 u64 data_size     on-file (encrypted/compressed) byte count
+    #   +0x10 u32 type
+    #   +0x14 u32 program_idx
+    #   +0x18 u32 hashed
+    #   +0x1C u32 sha1_idx
+    #   +0x20 u32 encrypted     3 = AES-128-CTR
+    #   +0x24 u32 key_idx       index into the key table (16-byte entries)
+    #   +0x28 u32 iv_idx        index into the key table (16-byte entries)
+    #   +0x2C u32 compressed    1 = raw, 2 = zlib
     seg_certs = []
-    seg_cert_off = 0x20  # after certification header
+    seg_cert_off = 0x20  # after certification header (sizeof MetadataHeader)
     for i in range(section_count):
-        o = seg_cert_off + i * 0x20
+        o = seg_cert_off + i * 0x30
         sc = {
             'seg_offset':    be64(dec_cert, o),
             'seg_size':      be64(dec_cert, o + 8),
-            'comp_type':     be32(dec_cert, o + 16),  # 1=none, 2=zlib
-            'unknown':       be32(dec_cert, o + 20),
-            'enc_type':      be32(dec_cert, o + 24),  # 0=none, 1=AES-128-CTR, 2=unknown
-            'key_idx':       be32(dec_cert, o + 28),
+            'type':          be32(dec_cert, o + 0x10),
+            'program_idx':   be32(dec_cert, o + 0x14),
+            'hashed':        be32(dec_cert, o + 0x18),
+            'sha1_idx':      be32(dec_cert, o + 0x1c),
+            'enc_type':      be32(dec_cert, o + 0x20),  # 3 = AES-128-CTR
+            'key_idx':       be32(dec_cert, o + 0x24),
+            'iv_idx':        be32(dec_cert, o + 0x28),
+            'comp_type':     be32(dec_cert, o + 0x2c),  # 1=none, 2=zlib
         }
         seg_certs.append(sc)
-        enc_name = {0: "plain", 1: "AES-CTR", 2: "enc-2"}.get(sc['enc_type'], f"enc-{sc['enc_type']}")
+        enc_name = {0: "plain", 3: "AES-CTR"}.get(sc['enc_type'], f"enc-{sc['enc_type']}")
         comp_name = {1: "raw", 2: "zlib"}.get(sc['comp_type'], f"comp-{sc['comp_type']}")
         print(f"    [{i}] offset=0x{sc['seg_offset']:X} size=0x{sc['seg_size']:X} "
-              f"{enc_name} {comp_name} key_idx={sc['key_idx']}")
+              f"{enc_name} {comp_name} key_idx={sc['key_idx']} iv_idx={sc['iv_idx']}")
 
-    # Key table (16 bytes per key, follows segment certs)
-    key_table_off = seg_cert_off + section_count * 0x20
+    # Key table (16 bytes per key, follows the 0x30-byte segment certs)
+    key_table_off = seg_cert_off + section_count * 0x30
     keys = []
     for i in range(key_count):
         o = key_table_off + i * 16
@@ -460,15 +480,13 @@ def decrypt_self(self_data, klicensee=None):
 
         seg_data = self_data[sc['seg_offset']:sc['seg_offset'] + sc['seg_size']]
 
-        if sc['enc_type'] == 1:  # AES-128-CTR encrypted
-            key_idx = sc['key_idx']
-            if key_idx + 1 < len(keys):
-                seg_key = keys[key_idx]
-                seg_iv = keys[key_idx + 1]
-                seg_data = aes_ctr_dec(seg_key, seg_iv, seg_data)
-                print(f"    [{i}] Decrypted 0x{len(seg_data):X} bytes with key[{key_idx}]")
+        if sc['enc_type'] == 3:  # AES-128-CTR encrypted
+            key_idx, iv_idx = sc['key_idx'], sc['iv_idx']
+            if key_idx < len(keys) and iv_idx < len(keys):
+                seg_data = aes_ctr_dec(keys[key_idx], keys[iv_idx], seg_data)
+                print(f"    [{i}] Decrypted 0x{len(seg_data):X} bytes with key[{key_idx}] iv[{iv_idx}]")
             else:
-                print(f"    [{i}] WARNING: key_idx {key_idx} out of range")
+                print(f"    [{i}] WARNING: key_idx {key_idx}/iv_idx {iv_idx} out of range")
         elif sc['enc_type'] == 0:
             print(f"    [{i}] Plain (no encryption)")
         else:
