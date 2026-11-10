@@ -97,6 +97,10 @@ extern "C" int  rsx_null_backend_pump_messages(void);
 #  define RSX_BACKEND_NAME    "null (headless software)"
 #endif
 
+/* Window lifetime, so main() can stop its frame loop when the user closes it. */
+static volatile int s_window_alive = 1;
+extern "C" int tj_window_alive(void) { return s_window_alive; }
+
 static DWORD WINAPI tj_present_thread(LPVOID)
 {
     const char* title = getenv("PS3_TITLE");
@@ -150,8 +154,10 @@ static DWORD WINAPI tj_present_thread(LPVOID)
             if (cellGcm_take_flip_pending())
                 rsx_backend_present();
             cellGcm_rsx_process_fifo();
-            if (rsx_backend_pump() != 0)
+            if (rsx_backend_pump() != 0) {
                 rsx_ok = 0;           /* window closed */
+                s_window_alive = 0;
+            }
         }
     }
 }

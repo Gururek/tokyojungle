@@ -66,6 +66,14 @@ static recomp_func_t dispatch_lookup(uint32_t guest_addr) {
         if (a == guest_addr) return function_table[mid].func;
         if (a < guest_addr) lo = mid + 1; else hi = mid;
     }
+    /* The generated table is *nearly* ascending: the per-TU merge interleaves a
+     * handful of out-of-order runs (10 in the current 10,958-entry table), so a
+     * pure binary search can miss an entry that is plainly there -- it missed
+     * the screen pump 0x001F2D88. Fall back to a scan; startup-only, so the
+     * cost is invisible. */
+    for (uint64_t i = 0; i < function_table_count; i++)
+        if ((uint32_t)function_table[i].addr == guest_addr)
+            return function_table[i].func;
     return nullptr;
 }
 
@@ -98,6 +106,8 @@ extern "C" void ppu_sysprx_register(void);
 extern "C" int  tj_crash_filter(unsigned long code);
 extern "C" void ps3_install_guest_ptr_trap(void);
 extern "C" void tj_start_present_thread(void);
+extern "C" int  tj_window_alive(void);          /* src/tj_present.cpp */
+extern "C" PPU_THREAD_LOCAL void (*g_trampoline_fn)(void*);
 extern "C" unsigned int ps3_hle_count(void);
 extern "C" void ppu_recomp_register(void);
 extern "C" void ppu_install_thread_trampoline(void);
@@ -755,6 +765,62 @@ int main(int argc, char* argv[])
         printf("\n[TJ] Function returned. r3=0x%llX\n",
                (unsigned long long)g_main_ctx.gpr[3]);
 #endif
+
+        /* The JP disc's main() is init + ONE screen-pump step + printf, then it
+         * returns (the NA disc keeps its frame loop inside main). The pump is
+         * the per-frame driver: drain the sysutil callbacks, wait the two tick
+         * waits, call the current screen's handler. Drive it per frame so the
+         * title keeps running, as it does on PS3. Off by default on Windows,
+         * where main() already loops; on by default elsewhere.
+         *
+         * Args are what main passed: r3 = 1 (the pump's 1-based frame index),
+         * r4 = ARGV_BASE (its first word is the block the pump reads at +0,
+         * its second at +4). */
+        {
+#ifdef _WIN32
+            const int loop_default = 0;
+#else
+            const int loop_default = 1;
+#endif
+            int loop_on = getenv("TJ_FRAME_LOOP")
+                              ? atoi(getenv("TJ_FRAME_LOOP")) : loop_default;
+            if (loop_on) {
+                uint32_t pump_addr = (uint32_t)strtoul(
+                    getenv("TJ_PUMP") ? getenv("TJ_PUMP") : (char*)"0x001F2D88",
+                    nullptr, 0);
+                recomp_func_t pump = dispatch_lookup(pump_addr);
+                if (!pump)
+                    fprintf(stderr, "[TJ] TJ_FRAME_LOOP: no pump at 0x%08X"
+                                    " (table: %llu entries, first 0x%llX, last 0x%llX)\n",
+                            pump_addr, (unsigned long long)function_table_count,
+                            (unsigned long long)function_table[0].addr,
+                            (unsigned long long)function_table[function_table_count ? function_table_count - 1 : 0].addr);
+
+                unsigned long long max_frames = getenv("TJ_MAX_FRAMES")
+                    ? strtoull(getenv("TJ_MAX_FRAMES"), nullptr, 0) : 0ull;
+                unsigned long long frame = 0;
+                while (pump && tj_window_alive() &&
+                       (max_frames == 0ull || frame < max_frames)) {
+                    g_main_ctx.gpr[3] = 1;
+                    g_main_ctx.gpr[4] = 0x00F00000u;   /* ARGV_BASE */
+                    pump(&g_main_ctx);
+                    while (g_trampoline_fn) {
+                        void (*tf)(void*) = g_trampoline_fn;
+                        g_trampoline_fn = 0;
+                        tf(&g_main_ctx);
+                    }
+                    frame++;
+                    if (getenv("TJ_FRAME_LOG") &&
+                        (frame == 1 || (frame % 60) == 0))
+                        fprintf(stderr,
+                                "[frame] %llu frames, r3=0x%llX, ticks=%llu\n",
+                                frame, (unsigned long long)g_main_ctx.gpr[3],
+                                (unsigned long long)vm_read32(0x00C0475Cu + 8));
+                }
+                if (frame)
+                    printf("[TJ] frame loop finished after %llu frame(s)\n", frame);
+            }
+        }
     } else {
         fprintf(stderr, "[TJ] ERROR: No valid entry point found.\n");
     }
