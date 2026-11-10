@@ -548,6 +548,34 @@ int main(int argc, char* argv[])
         }, (LPVOID)spec, 0, nullptr);
     }
 
+    /* TJ_DUMP=<hexaddr>:<hexlen>[:<delay_ms>] -- write a slice of guest memory
+     * to logs/dump_<addr>_<len>.bin after a delay. The title exits a few seconds
+     * after boot, so sampling at ~1200 ms catches the screen table and manager
+     * objects alive, which is how the screen-advance loop gets decoded without
+     * rebuilding with per-site traces. */
+    if (const char* dp = getenv("TJ_DUMP")) {
+        static char dspec[128];
+        strncpy(dspec, dp, sizeof dspec - 1);
+        CreateThread(nullptr, 0, [](LPVOID p) -> DWORD {
+            char* s = (char*)p;
+            unsigned addr = 0, len = 0, ms = 1200;
+            sscanf(s, "%x:%x:%u", &addr, &len, &ms);
+            Sleep(ms);
+            extern uint8_t* vm_base;
+            if (!vm_base || !addr || !len) return 0u;
+            char path[160];
+            snprintf(path, sizeof path, "logs/dump_%08X_%08X_%ums.bin", addr, len, ms);
+            FILE* f = fopen(path, "wb");
+            if (!f) return 0u;
+            fwrite(vm_base + addr, 1, len, f);
+            fclose(f);
+            fprintf(stderr, "[TJ] dumped 0x%X bytes at guest 0x%08X -> %s\n",
+                    len, addr, path);
+            fflush(stderr);
+            return 0u;
+        }, (LPVOID)dspec, 0, nullptr);
+    }
+
     /* TJ_OPD_GUARD=1: write-protect the HLE OPD arena once it is built.
      * The arena is correct at startup (verified by peek) but some entries read
      * back as zero later, so an import that worked earlier starts dispatching
