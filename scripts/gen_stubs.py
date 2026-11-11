@@ -495,6 +495,20 @@ void func_00010200(ppu_context* ctx) {
     print(f"  Generated ppu_stubs.c ({len(CRT_OVERRIDES)} overrides)")
 
 
+def write_if_changed(path, text):
+    """Write `text` to `path` only when it differs, so a regeneration that
+    changes nothing does not dirty every translation unit that includes it."""
+    try:
+        with open(path) as f:
+            if f.read() == text:
+                return False
+    except OSError:
+        pass
+    with open(path, 'w') as f:
+        f.write(text)
+    return True
+
+
 def split_source(src_path, parts):
     """Split the merged lifted source into `parts` translation units.
 
@@ -538,24 +552,17 @@ def split_source(src_path, parts):
     if cur:
         buckets.append(''.join(cur))
 
-    with open('generated/ppu_recomp_preamble.h', 'w') as f:
-        f.write(preamble)
+    write_if_changed('generated/ppu_recomp_preamble.h', preamble)
 
     written = []
     for i, bucket in enumerate(buckets):
         path = f'generated/ppu_recomp_{i:03d}.cpp'
-        with open(path, 'w') as f:
-            if i == 0:
-                f.write(preamble)
-            else:
-                f.write('#include "ppu_recomp_preamble.h"\n')
-            f.write(bucket)
+        body = (preamble if i == 0 else '#include "ppu_recomp_preamble.h"\n') + bucket
+        write_if_changed(path, body)
         written.append(path)
     if table:
         path = 'generated/ppu_recomp_999.cpp'
-        with open(path, 'w') as f:
-            f.write('#include "ppu_recomp.h"   /* func_entry, the func_* decls */\n')
-            f.write(table)
+        write_if_changed(path, '#include "ppu_recomp.h"   /* func_entry, the func_* decls */\n' + table)
         written.append(path)
 
     os.remove(src_path)

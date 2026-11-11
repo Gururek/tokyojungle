@@ -10,11 +10,12 @@
 #   scripts/bgtask.sh run-140 scripts/runexp.sh 140 TJ_GENMAP=1
 #   scripts/bgtask.sh run-141 scripts/runexp.sh 141 TJ_TICKRING=0
 #
-# Knobs: DUR (timeout, default 60), SHOTAT (seconds before the shot, default
+Knobs: BIN defaults to the clang tree (fastest).
+# DUR (timeout, default 60), SHOTAT (seconds before the shot, default
 # 25), FRAMES/FLOG/TICK_US, BIN (default build/tokyojungle), SHOT=0 to skip.
 set -uo pipefail
 TAG=${1:?usage: runexp.sh <tag> [env ...]}; shift
-BIN=${BIN:-build/tokyojungle}
+BIN=${BIN:-build-clang/tokyojungle}
 DUR=${DUR:-60}
 LOG=logs/run-$TAG.log
 pkill -9 -x tokyojungle 2>/dev/null; sleep 1
