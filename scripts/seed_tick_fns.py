@@ -32,8 +32,10 @@ ROOT = Path(__file__).resolve().parent.parent
 SEEDS = {
     "0x003B4388": "0x003B438C",  # lwz r9,0(r3); blr   - ticket producer
     "0x003B42B8": "0x003B42BC",  # lwz r11,0(r3); blr  - ticket consumer
-    "0x00342258": "0x00342274",  # flip-queue vtable (pump's ticket obj)
-    "0x00342168": "0x00342180",  # flip-queue vtable (constructor writes it)
+    # The two flip-queue vtables stay data: their words decode as a method
+    # table, and lifting them as code returns garbage in r3 from the pad-init
+    # path, which puts the boot back to spinning on cellPadInit.
+    
 }
 
 TARGETS = [

@@ -33,8 +33,13 @@ PROBES = [
         'printf("[SCR] post-ticks r30=%08X wi=%08X\\n",(uint32_t)ctx->gpr[30],'
         '(uint32_t)vm_read32(vm_read32(ctx->gpr[2]+0x14DC)+8));'),
     ('ctx->lr = 0x001F2E74; func_001F1708(ctx); DRAIN_TRAMPOLINE(ctx);',
-        'printf("[SCR] drain pass ticket=%08X r28=%08X\\n",(uint32_t)ctx->gpr[31],'
-        '(uint32_t)ctx->gpr[28]);'),
+        'printf("[SCR] drain pass ticket=%08X r28=%08X type=%d head=%08X tail=%08X cur=%d cap=%d\\n",'
+        '(uint32_t)ctx->gpr[31],(uint32_t)ctx->gpr[28],'
+        "(int)(int32_t)vm_read32((uint32_t)ctx->gpr[31]),"
+        "(int)(int32_t)vm_read32((uint32_t)ctx->gpr[31]+4),"
+        "(int)(int32_t)vm_read32((uint32_t)ctx->gpr[31]+8),"
+        "(int)(int32_t)vm_read32((uint32_t)ctx->gpr[31]+0x1C),"
+        '(int)(int32_t)vm_read32((uint32_t)ctx->gpr[31]+0x20));'),
     ('ctx->lr = 0x001F2F74; func_00243E0C(ctx); DRAIN_TRAMPOLINE(ctx);',
         'printf("[SCR] register-request idx=%d ret=%d\\n",(int)(int32_t)ctx->gpr[3],'
         "(int)(int32_t)ctx->gpr[26]);"),
