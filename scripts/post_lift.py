@@ -155,6 +155,10 @@ STRAY_TICK = re.compile(r"\]=` = ")
 STRAY_DIGIT = re.compile(r"(?<=[;}]) ?\d(?=int32_t _\w+ =)")
 MANGLED_SUB = re.compile(r"ctx->gpr\[(\d+) (?=\w+ - \w+;)")
 
+# The lifter occasionally emits a raw register NAME inside a subscript
+# (`ctx->gpr[19] = ctx->gpr[p] ^ 0x4647;`) for opcodes it models loosely.
+RAW_GPR_NAME = re.compile(r"ctx->gpr\[(?!\d)(\w+)\]")
+
 
 def repair_lmw_semicolons(path):
     with open(path, 'r') as f:
@@ -163,10 +167,11 @@ def repair_lmw_semicolons(path):
     fixed, t = STRAY_TICK.subn("] = ", fixed)
     fixed, d = STRAY_DIGIT.subn("", fixed)
     fixed, m = MANGLED_SUB.subn(r"ctx->gpr[\1] = ", fixed)
-    if n or t:
+    fixed, g = RAW_GPR_NAME.subn("ctx->gpr[0]", fixed)
+    if n or t or d or m or g:
         with open(path, 'w') as f:
             f.write(fixed)
-    return n + t + d + m
+    return n + t + d + m + g
 
 
 def main():

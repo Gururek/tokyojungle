@@ -376,6 +376,11 @@ if(NOT WIN32)
         $<$<COMPILE_LANGUAGE:CXX>:-Wno-class-memaccess -Wno-extern-initializer>
         $<$<COMPILE_LANGUAGE:C>:-Wno-class-memaccess -Wno-extern-initializer>
     )
+    # Clang does not know every GCC warning name; tell it to stay quiet about
+    # the ones it has not heard of, so one flag set works for both compilers.
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        target_compile_options(tokyojungle PRIVATE -Wno-unknown-warning-option)
+    endif()
 endif()
 
 # The lifted PPU translation unit spells register/vector alignment with MSVC's

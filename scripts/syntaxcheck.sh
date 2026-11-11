@@ -27,8 +27,10 @@ for e in json.load(open(sys.argv[1])):
             if skip:
                 skip = 0
                 continue
-            if t in ('-o', '-c'):
+            if t == '-o':          # drop the object path, keep the source
                 skip = 1
+                continue
+            if t == '-c':
                 continue
             out.append(t)
         print(' '.join(out[1:]))
