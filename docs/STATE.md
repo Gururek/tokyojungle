@@ -143,3 +143,38 @@ black screen, so the pieces are recorded here:
   -DCMAKE_CXX_COMPILER=clang++`, then `scripts/bgtask.sh work-A
   scripts/work.sh work-A` (build + run batches, one row in the ledger,
   `scripts/bgstatus.sh` says RUNNING/STALE/OK/FAIL).
+
+## Why the screen is black on the master/Vulkan tree (run-m8..m14)
+
+The pump runs (6,556 steps with `TJ_TICKRING=0x20002008 TJ_TICKVALUES=0,FFFFFFFF`)
+and the window shows the boot clear, but the title submits **one** FIFO command
+buffer of 252 bytes: `TJ_REFWATCH` says `put=001000FC get=001000FC ref=FFFFFFFF`
+and never changes, so per-frame submissions stop after boot.  Evidence:
+
+- `TJ_GENMAP=1 TJ_IMPTRACE=1` over 5,618 pump steps: **36 HLE calls in total**
+  (one each: cellPadInit/End, cellVideoOut*, cellSysutil*, sys_lwmutex*,
+  sys_initialize_tls, cellSysmoduleLoadModule).  Zero GCM calls per frame.
+- `RSX_ENGINE_PASS_DUMP=logs/passes RSX_ENGINE_PASS_DUMP_AFTER=5` captures **no
+  passes** — no draw reaches the register-file engine (it is up:
+  `[rsx engine] register-file draw engine up (1280x720)`,
+  `[rsx engine] surface 0:0x00000000 1280x720 fmt 3`, so the framebuffer is set).
+- `PS3_CALLTRACE=260` over 1,398 steps: the dominant per-frame call target is
+  **0x00000000 (124 hits)**, i.e. a virtual method on an object whose vtable
+  word is 0.  Two sites:
+    * `func_000266B4+0xF3D` (lr=0x000266F4) walks an intrusive list of 0x30-byte
+      elements at 0x00A7F010, 0x00A7F040, ... (word +0x14 = next, +0x18 = prev;
+      every other field is 0, so the elements are value-initialised) and calls
+      `[[obj]+0]` per element.
+    * `func_001F5320+0x276` (lr=0x001F5338, the `bl 0x1f30ec` thunk) with
+      r3=0 r4=0 r5=0x00F00004 — the ticket publish path calling a method on a
+      null object.
+- The screen machine's per-frame entry runs only twice, at boot:
+  `[SCR] handler r3=0 r5=0` then `[SCR] handler r3=6 r5=0` (JP disc ids, small
+  integers, not the NA disc's 0x131/0x132/0x101).  The list-flag byte
+  `[TOC+0x14D8]` = 0x00C03F28 reads 0, and the list heads at 0x00C03F2C/30 are
+  0 — nothing is queued, so every pump call takes the empty-drain path.
+
+So the roadblock is upstream of the backend: the per-frame path stops at a
+virtual call on an uninitialised object, and the screen list is empty.
+Next probes: find who fills those 0x30-byte list elements (and their vtable),
+and who is supposed to enqueue a screen.
