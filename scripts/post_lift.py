@@ -135,6 +135,40 @@ def patch_file(path):
     return patched
 
 
+# The lifter emits a load-multiple (lmw) as one statement per register joined
+# with " ".  For a 24-register lmw the join can drop a separator, leaving
+# `vm_read32(_ea + 28){ ctx->gpr[15] = ...` -- one missing ';' in a 90 MB
+# translation unit, which GCC reports as "expected ';' before '{' token" plus a
+# brace-imbalance cascade ("a function-definition is not allowed here",
+# "jump to label").  Repair it here so every lift gets a clean tree.
+LMW_SEMICOLON = re.compile(r"vm_read32\(_ea \+ (\d+)\)(?=\{)")
+
+# A single stray '`' lands in the lifted text at one spot per emitted file
+# (`ctx->gpr[13]`= _b - _a; ...`): GCC reads it as "stray '`' in program" and
+# then reports an "unable to find numeric literal operator" cascade.  It is a
+# ';' that the writer emitted as a backtick.
+STRAY_TICK = re.compile(r"\]=` = ")
+
+# Two more single-shot writer glitches seen in the emitted text: a digit glued
+# in front of a declaration (`; 5int32_t _c = ...`) and a subscript that loses
+# its `] =` (`ctx->gpr[13 _b - _a;`).
+STRAY_DIGIT = re.compile(r"(?<=[;}]) ?\d(?=int32_t _\w+ =)")
+MANGLED_SUB = re.compile(r"ctx->gpr\[(\d+) (?=\w+ - \w+;)")
+
+
+def repair_lmw_semicolons(path):
+    with open(path, 'r') as f:
+        text = f.read()
+    fixed, n = LMW_SEMICOLON.subn(r"vm_read32(_ea + \1);", text)
+    fixed, t = STRAY_TICK.subn("] = ", fixed)
+    fixed, d = STRAY_DIGIT.subn("", fixed)
+    fixed, m = MANGLED_SUB.subn(r"ctx->gpr[\1] = ", fixed)
+    if n or t:
+        with open(path, 'w') as f:
+            f.write(fixed)
+    return n + t + d + m
+
+
 def main():
     files = sorted(glob.glob(RECOMP_GLOB))
     if not files:
@@ -143,6 +177,12 @@ def main():
         print("post_lift: no %s -- run the lifter first" % RECOMP_GLOB,
               file=sys.stderr)
         return 1
+
+    mended = 0
+    for path in files:
+        mended += repair_lmw_semicolons(path)
+    if mended:
+        print("post_lift: repaired %d lmw statement(s) missing a ';'" % mended)
 
     done = set()
     for path in files:

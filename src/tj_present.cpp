@@ -156,7 +156,12 @@ static DWORD WINAPI tj_present_thread(LPVOID)
                      * request(0xFFFFFFFF = -1) - and func_001F734C spins while
                      * (int)ticket < (int)[consumer+8].  So the consumer's
                      * processed-ticket counter counts DOWN, one per ticket. */
-                    vm_write32(tick_ea, (uint32_t)((int32_t)vm_read32(tick_ea) - 1));
+                    /* func_001F734C spins while (int)ticket < (int)[r30+8], where
+                     * [r30+8] holds the sequence the consumer copied out of the
+                     * ring's write index.  The pump's tickets are 0 then -1, so
+                     * the published sequence has to come DOWN to them: 0 clears
+                     * both. */
+                    vm_write32(tick_ea, 0u);
                 }
             }
             if (rsx_ok && cellGcm_take_flip_pending())

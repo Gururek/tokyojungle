@@ -70,6 +70,13 @@ if(TJ_ENABLE_GENERATED_VM_FAST_ACCESS AND WIN32 AND GENERATED_PPU_SOURCES)
         set_property(SOURCE ${GENERATED_PPU_SOURCES} APPEND PROPERTY
             COMPILE_OPTIONS ${TJ_GENERATED_PPU_COMPILE_OPTIONS})
     endif()
+    # GCC 16 segfaults (cc1plus signal 11) on a handful of these 40 MB
+    # translation units at -O3; -O2 compiles them in about half the time with no
+    # visible cost, because the app spends its time inside the lifted functions.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        set_property(SOURCE ${GENERATED_PPU_SOURCES} APPEND PROPERTY
+            COMPILE_OPTIONS -O2)
+    endif()
     message(STATUS "generated PPU VM fast access: ON")
 else()
     message(STATUS "generated PPU VM fast access: OFF")
@@ -359,6 +366,15 @@ if(NOT WIN32)
     target_compile_definitions(tokyojungle PRIVATE _GNU_SOURCE)
     target_compile_options(tokyojungle PRIVATE
         -include "${PS3RECOMP_DIR}/runtime/platform/win32_compat.h"
+    )
+    # The lifted PPU source is machine-generated, so it trips three GCC
+    # diagnostics that carry no information: -Wclass-memaccess on the
+    # memset/memcpy of ppu_context/u128 (both are trivial-layout aggregates),
+    # and "initialized and declared extern" on ps3recomp's `extern "C" T x = 0;`
+    # definition idiom.  Silencing them keeps a build log readable end to end.
+    target_compile_options(tokyojungle PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-class-memaccess -Wno-extern-initializer>
+        $<$<COMPILE_LANGUAGE:C>:-Wno-class-memaccess -Wno-extern-initializer>
     )
 endif()
 
