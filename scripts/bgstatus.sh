@@ -2,7 +2,8 @@
 # Report, flag, and reap background jobs started with scripts/bgtask.sh.
 #
 #   scripts/bgstatus.sh            # list jobs, flag the long ones
-#   scripts/bgstatus.sh --stale    # also KILL the long ones
+#   scripts/bgstatus.sh --stale    # kill jobs running longer than BG_WARN_MIN (default 25m)
+#   scripts/bgstatus.sh --kill     # kill ALL running background jobs and their child trees
 #   scripts/bgstatus.sh --keep     # keep finished rows in the ledger
 #
 # logs/tasks.tsv is the ledger; every job I start goes into it, so nothing is
@@ -29,14 +30,17 @@ while IFS=$'\t' read -r name pid started _; do
         status=RUNNING
         [ "$age" -gt "$WARN" ] && { status=STALE; stale=$((stale + 1)); }
         printf '%s\t%s\t%s\t%s\t%sm\tlogs/%s.log\n' "$name" "$pid" "$started" "$status" "$age" "$name"
-        printf '%s\t%s\t%s\n' "$name" "$pid" "$started" >> "$tmp"
-        if [ "$ACTION" = "--stale" ] && [ "$status" = STALE ]; then
-            pkill -9 -P "$pid" 2>/dev/null
-            kill -9 "$pid" 2>/dev/null
-            echo "  killed $name (pid $pid, ${age}m): $(tail -1 "$log" 2>/dev/null | cut -c1-70)"
+        if ([ "$ACTION" = "--stale" ] && [ "$status" = STALE ]) || [ "$ACTION" = "--kill" ] || [ "$ACTION" = "-k" ]; then
+            # Kill the entire process group (-$pid and -g $pid) to ensure no grandchildren (ninja, clang++) survive
+            kill -9 -"$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null
+            pkill -9 -g "$pid" 2>/dev/null
+            echo "  killed $name (pid/pgid $pid, ${age}m): $(tail -1 "$log" 2>/dev/null | cut -c1-70)"
+        else
+            printf '%s\t%s\t%s\n' "$name" "$pid" "$started" >> "$tmp"
         fi
     else
-        # Finished: ask the log.  `## [..] FAILED:` (work.sh), the lifter/fixture
+        # Process exited: ensure any orphaned process group remnants are killed
+        pkill -9 -g "$pid" 2>/dev/null        # Finished: ask the log.  `## [..] FAILED:` (work.sh), the lifter/fixture
         # chain's own markers, then compiler/build/run evidence.
         status=OK
         detail=$(grep -a "^## \[.*FAILED" "$log" 2>/dev/null | tail -1 | sed 's/^## //')

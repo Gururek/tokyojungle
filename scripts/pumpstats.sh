@@ -11,7 +11,7 @@
 set -uo pipefail
 L=${1:?usage: pumpstats.sh <log>}
 say() { printf '%-22s %s\n' "$1" "$2"; }
-say "pump steps:"  "$(grep -acE '\[SCR\] idx=' "$L")"
+say "pump steps:"  "$(grep -acE '\[SCR\] loop' "$L")"
 say "frames:"      "$(grep -acE '^\[frame\]' "$L")"
 say "last frame:"  "$(grep -aE '^\[frame\]' "$L" | tail -1)"
 say "drain pass:"  "$(grep -aE 'drain pass' "$L" | tail -1)"

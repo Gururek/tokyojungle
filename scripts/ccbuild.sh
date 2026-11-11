@@ -8,7 +8,9 @@ cd "$(dirname "$0")/.."
 export PATH="$PWD/.venv/bin:$PATH"
 DIR="${1:-build}"
 shift || true
-JOBS="${JOBS:-16}"
+# Cap default JOBS to 2: each of the 8 lifted translation units is ~133 MB and takes
+# ~10 GB RAM to compile. Parallelism higher than 2 causes heavy swap thrashing and compiler crashes.
+JOBS="${JOBS:-2}"
 for pass in 1 2 3 4; do
     j=$(( JOBS / (2 ** (pass - 1)) ))
     [ "$j" -lt 1 ] && j=1

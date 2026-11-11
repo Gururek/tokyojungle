@@ -829,7 +829,16 @@ int main(int argc, char* argv[])
                      * capacity, 0x0000800F), not a pointer to it - priming it
                      * with 0x03002000 gave `malloc(): unaligned tcache chunk`
                      * as the next allocation used that as a size. */
-                    {0x00C0475Cu, 0x0000800Fu, "tick ring capacity (the ring object's first word)"},
+                    /* The tick ring object.  [TOC+0x14DC] = 0x00C0475C is a
+                     * POINTER to it, and nothing publishes it before the pump's
+                     * first tick (the probe read obj=00000000).  Build one in
+                     * the guest heap: the producer (func_001F73CC) needs
+                     * +0x04 = end of the record area and +0x08 = write pointer,
+                     * and only calls the consumer at +0x0C once the ring is
+                     * full, so leaving it null is safe for 24 records. */
+                    {0x00C0475Cu, 0x0000800Fu, "tick ring object at 0x00C0475C: capacity word (42-frame run)"},
+                    {0x00C04760u, 0x00000000u, "tick ring: end of record area (0 = ring is the object itself)"},
+                    {0x00C04764u, 0x00000000u, "tick ring: write pointer / processed counter"},
                     {0x03002008u, 0x00000080u,
                      "tick ring write index (ring object at 0x03002000 = the GCM control block)"},
                     /* The consumer's processed-ticket counter. func_001F734C
@@ -841,6 +850,14 @@ int main(int argc, char* argv[])
                      * it by one per tick. */
                     {0x02010008u, 0x00000000u,
                      "tick consumer processed-ticket counter at [0x02010000+8]; the pump's tickets descend 0, -1, -2 ... so this counts down"},
+                    /* Drain gate. func_001F1708 returns 0 and func_001F54EC
+                     * returns early unless byte[ticket+5] AND byte[ticket+6]
+                     * are set; with both set the pump's drain calls the
+                     * ticket's vtable method [+0x10] (OPD 0x0034E178 -> code
+                     * 0x001F1428).  Word [ticket+4] holds bytes +4..+7, big
+                     * endian, so 0x00010100 sets +5 and +6. */
+                    {0x02010004u, 0x00000000u,
+                     "ticket drain gate: bytes +5/+6 - closed (the 42-frame shape)"},
                 };
                 for (const auto& p : k_init) {
                     vm_write32(p.addr, p.value);

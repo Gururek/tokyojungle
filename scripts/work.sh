@@ -21,8 +21,8 @@ stage() { echo "## [$(date +%H:%M:%S)] $*"; }
 # chain does, and the marker is what bgstatus.sh shows as the row's status.
 fail() { stage "FAILED: $1"; exit 1; }
 
-stage "build start ($BIN_DIR, JOBS=${JOBS:-10})"
-JOBS=${JOBS:-10} scripts/ccbuild.sh "$BIN_DIR" || fail build
+stage "build start ($BIN_DIR, JOBS=${JOBS:-2})"
+JOBS=${JOBS:-2} scripts/ccbuild.sh "$BIN_DIR" || fail build
 stage "build ok: $(ls -l "$BIN_DIR/tokyojungle" 2>/dev/null | awk '{print $6" "$7" "$8}')"
 
 BIN=$PWD/$BIN_DIR/tokyojungle

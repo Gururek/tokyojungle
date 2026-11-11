@@ -28,7 +28,7 @@ done
 # A run that produced no boot banner is a failed run, not a result.
 for spec in "$@"; do
     tag=${spec%%:*}
-    grep -aq "VM allocated" "logs/run-$tag.log" 2>/dev/null || {
+    grep -aqE "VM +allocated" "logs/run-$tag.log" 2>/dev/null || {
         echo "run-$tag: no boot output (binary crashed on start?)" >> "$OUT"
         fails=$((fails + 1))
     }

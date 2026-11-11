@@ -148,7 +148,7 @@ static DWORD WINAPI tj_present_thread(LPVOID)
                 if (!init) {
                     const char* e = getenv("TJ_TICKRING");
                     tick_ea = e ? (uint32_t)strtoul(e, NULL, 0)
-                                : 0x02010008u;   /* consumer processed-ticket counter */
+                                : 0x02010008u;   /* ticket consumer's processed-ticket counter */
                     init = 1;
                 }
                 if (tick_ea) {
@@ -161,7 +161,26 @@ static DWORD WINAPI tj_present_thread(LPVOID)
                      * ring's write index.  The pump's tickets are 0 then -1, so
                      * the published sequence has to come DOWN to them: 0 clears
                      * both. */
-                    vm_write32(tick_ea, 0u);
+                    /* Two consumers share one register. The fence spin
+                     * (func_001F8C4C = cellGcmFinish) waits ref == the value the
+                     * title's SET_REFERENCE wrote -- the boot ring emits 0 at
+                     * +0xF4 and 0xFFFFFFFF at +0xEC. The pump's ticket spins
+                     * want 0 then -1 (signed). Cycling the values per vblank
+                     * lets each waiter see its own value, one per tick, which
+                     * is what hardware does: the register holds each fence for
+                     * about a frame. TJ_TICKVALUES overrides the cycle. */
+                    static const uint32_t k_cycle[] = { 0u, 0xFFFFFFFFu };
+                    static uint32_t k_cycle_i = 0;
+                    const char* tv = getenv("TJ_TICKVALUES");
+                    if (tv && tv[0]) {
+                        /* comma separated hex cycle, e.g. "0,FFFFFFFF" */
+                        uint32_t vals[8]; int n = 0;
+                        const char* q = tv;
+                        while (n < 8 && *q) { vals[n++] = (uint32_t)strtoul(q, (char**)&q, 16); if (*q == ',') q++; }
+                        if (n) vm_write32(tick_ea, vals[k_cycle_i++ % n]);
+                    } else {
+                        vm_write32(tick_ea, k_cycle[k_cycle_i++ % (sizeof k_cycle / sizeof k_cycle[0])]);
+                    }
                 }
             }
             if (rsx_ok && cellGcm_take_flip_pending())
