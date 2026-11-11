@@ -151,8 +151,13 @@ static DWORD WINAPI tj_present_thread(LPVOID)
                                 : 0x02010008u;   /* consumer processed-ticket counter */
                     init = 1;
                 }
-                if (tick_ea)
-                    vm_write32(tick_ea, 0x80000000u);
+                if (tick_ea) {
+                    /* The pump's tickets DESCEND - request(0), then
+                     * request(0xFFFFFFFF = -1) - and func_001F734C spins while
+                     * (int)ticket < (int)[consumer+8].  So the consumer's
+                     * processed-ticket counter counts DOWN, one per ticket. */
+                    vm_write32(tick_ea, (uint32_t)((int32_t)vm_read32(tick_ea) - 1));
+                }
             }
             if (rsx_ok && cellGcm_take_flip_pending())
                 rsx_backend_present();

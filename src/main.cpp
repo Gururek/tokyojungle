@@ -830,8 +830,8 @@ int main(int argc, char* argv[])
                      * harness advanced. Primed to a large positive value so
                      * both tickets are satisfied, then the vblank ticker bumps
                      * it by one per tick. */
-                    {0x02010008u, 0xFFFFFFFFu,
-                     "tick consumer processed-ticket counter at [0x02010000+8]; signed tickets 0 then -1, so -1 satisfies both"},
+                    {0x02010008u, 0x00000000u,
+                     "tick consumer processed-ticket counter at [0x02010000+8]; the pump's tickets descend 0, -1, -2 ... so this counts down"},
                 };
                 for (const auto& p : k_init) {
                     vm_write32(p.addr, p.value);
