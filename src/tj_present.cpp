@@ -148,7 +148,7 @@ static DWORD WINAPI tj_present_thread(LPVOID)
                 if (!init) {
                     const char* e = getenv("TJ_TICKRING");
                     tick_ea = e ? (uint32_t)strtoul(e, NULL, 0)
-                                : 0x03002008u;   /* GCM ref == the ring object at 0x03002000, +8 */
+                                : 0x02010008u;   /* consumer processed-ticket counter */
                     init = 1;
                 }
                 if (tick_ea)

@@ -818,8 +818,20 @@ int main(int argc, char* argv[])
                      * target ticket is 0xFFFFFFFF, so the write index must
                      * START 8 below it. Left at 0 the pump spins forever on the
                      * GCM ref register (0x03002008). */
-                    {0x03002008u, 0x80000000u,
-                     "tick ring write index ([0x00C0475C]=0x03002000, +8 = GCM ref); the second ticket is signed -1, so the write index is a signed counter: 0x80000000 satisfies both tickets"},
+                    /* The GCM control block IS the tick ring: [0x00C0475C] =
+                     * 0x03002000, and the producer (func_001F73CC) writes its
+                     * entries at [obj+8] = 0x03002008. */
+                    {0x03002008u, 0x00000080u,
+                     "tick ring write index (ring object at 0x03002000 = the GCM control block)"},
+                    /* The consumer's processed-ticket counter. func_001F734C
+                     * publishes a ticket (0, then 0xFFFFFFFF = -1, signed) and
+                     * spins while [0x02010000+8] has not reached it; the object
+                     * is the tick consumer at 0x02010000, which nothing in the
+                     * harness advanced. Primed to a large positive value so
+                     * both tickets are satisfied, then the vblank ticker bumps
+                     * it by one per tick. */
+                    {0x02010008u, 0xFFFFFFFFu,
+                     "tick consumer processed-ticket counter at [0x02010000+8]; signed tickets 0 then -1, so -1 satisfies both"},
                 };
                 for (const auto& p : k_init) {
                     vm_write32(p.addr, p.value);
