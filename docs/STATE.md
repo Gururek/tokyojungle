@@ -178,3 +178,45 @@ So the roadblock is upstream of the backend: the per-frame path stops at a
 virtual call on an uninitialised object, and the screen list is empty.
 Next probes: find who fills those 0x30-byte list elements (and their vtable),
 and who is supposed to enqueue a screen.
+
+## Upstream research, and the window (Nov 12, afternoon)
+
+**The window is back.** The Vulkan backend renders offscreen by default and only
+creates a window when `PS3RECOMP_VK_WINDOW` is set (`rsx_vulkan_backend.c:1748`),
+while the null/GL backend always created one — that is why the window vanished
+when the app moved to ps3recomp master.  `src/tj_present.cpp` now defaults
+`PS3RECOMP_VK_WINDOW=1` and `DISPLAY=:0` on POSIX (SDL says "x11 not available"
+for a background run with no DISPLAY, which made every headless run look like the
+window code was broken).  Verified: X11 lists `0x320002f 1280x720 viewable
+'Tokyo Jungle (ps3recomp)'`.
+
+**Heap**: `run-m15` aborted at boot with
+`[HLE] ERROR: heap allocation failed (requested=1488 align=16 free=166579216 largest=150929408 blocks=65536)`
+— 166 MB free, so the first-fit allocator had run out of *table* entries, not
+memory.  `src/import_resolver.h`: table grown to 1M blocks, and `hle_free()`
+binary-searches the address-ordered table (falling back to the scan for interior
+pointers).  Next run: 6,242 pump steps, zero heap failures.
+
+**Online findings that matter here**:
+
+- The black screen is title-side, not backend-side.  ps3recomp's CI runs the
+  Vulkan backend on Linux (lavapipe under the validation layer) as a supported
+  row, and the v0.14 Vulkan work came from a Twisted Metal port that is *in game*
+  (deferred-renderer-ready draw engine, Vulkan stencil, cube maps, RGBA16F
+  targets, SPURS fixes).  The published Tokyo Jungle status, and LasVola's
+  Playable fork, are D3D12/Windows where the title screen renders — so the guest
+  side is known good and we are early in its boot.
+- `docs/RSX_GRAPHICS.md`: cellGcmSys → rsx_commands state tracker → one backend;
+  the Vulkan backend is described as "guest shaders on the shared draw engine",
+  i.e. `PS3RECOMP_VK_GUEST_PROGRAMS=1` is the intended modern path (tested: it
+  selects the register-file engine, and the frame is still the boot clear).
+- Upstream added `GCM_FIFO_SEGMENT=<n>` — hand the command ring out in segments
+  as libgcm does, "so the walker can start on a frame while the title is still
+  writing it" (#566).  Directly relevant to `put == get` after one buffer.
+
+Knob catalogue worth an A/B batch (from master's `getenv` sites):
+`GCM_FIFO_SEGMENT`, `GCM_GET_EQ_PUT`, `GCM_FLIPCB_ONTICK`, `GCM_FLIP_NEEDS_FIFO`,
+`GCM_PARK_GRACE_MS`, `GCM_SEMA_ACQUIRE`(+`_MS`), `GCM_SUBCH_GATE`, `NV3089_GATE`,
+`GCM_REFPUB`, `GCM_SCANREF`, `GCM_RATE`; Vulkan side
+`PS3RECOMP_VK_GUEST_PROGRAMS`, `VK_DRAW_BATCH`(+`_MAX`), `PS3RECOMP_VK_MRT_MASK`,
+`PS3RECOMP_RSX_ENGINE`, `RSX_ENGINE_PASS_DUMP*`.
