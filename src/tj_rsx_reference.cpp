@@ -13,6 +13,8 @@
 #include "../../ps3recomp/libs/video/rsx_d3d12_backend.h"
 #ifdef _WIN32
 #include <windows.h>
+#else
+#define _putenv_s(name, value) setenv((name), (value), 1)
 #endif
 
 extern "C" int cellGcmFifoSubchannelMethod(u32, u32, u32);

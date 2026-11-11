@@ -5,6 +5,26 @@
    favour of the real header. The (void*) cast in the registration table needs
    a declaration that is not `void f(void)` -- the header gives it. */
 #include "cellFiber.h"
+
+/* ps3recomp master renamed/reworked the cellFiber PPU API: the scheduler-taking
+   names are the current ones, and the SPURS-era names the disc imports map onto
+   them one-for-one.  The registration table casts to void* and the trampoline
+   passes the context through, so the differing signatures are not a problem. */
+#ifdef PS3RECOMP_CELLFIBER_SCHEDULER_API
+#define cellFiberPpuInitialize cellFiberPpuInitializeScheduler
+#define cellFiberPpuFinalize cellFiberPpuFinalizeScheduler
+#define cellFiberPpuAttributeInitialize _cellFiberPpuAttributeInitialize
+#define cellFiberPpuSchedulerAttributeInitialize _cellFiberPpuSchedulerAttributeInitialize
+#define cellFiberPpuDeleteFiber cellFiberPpuJoinFiber
+#define cellFiberPpuSwitchFiber cellFiberPpuYield
+#define cellFiberPpuYieldFiber cellFiberPpuYield
+#define cellFiberPpuExitFiber cellFiberPpuExit
+#define cellFiberPpuGetCurrentFiber cellFiberPpuSelf
+#define cellFiberPpuGetFiberState cellFiberPpuSelf
+#define cellFiberPpuSleep cellFiberPpuWaitSignal
+#define cellFiberPpuWakeup cellFiberPpuSendSignal
+#endif   /* PS3RECOMP_CELLFIBER_SCHEDULER_API */
+
 extern "C" void ps3_hle_register(unsigned int nid, const char* name, void* handler);
 extern "C" {
     void cellAdecOpen(void);
@@ -95,7 +115,7 @@ extern "C" {
     void cellDmuxReleaseAu(void);
     void cellDmuxFlushEs(void);
 #ifndef PS3RECOMP_CELLFIBER_H
-#ifndef PS3RECOMP_CELLFIBER_H
+#ifndef PS3RECOMP_CELL_FIBER_H   /* master's spelling; the pin uses CELLFIBER */
     void cellFiberPpuCreateFiber(void);
 #endif
 #endif

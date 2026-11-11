@@ -811,6 +811,13 @@ int main(int argc, char* argv[])
                 /* Guest globals that the boot sequence's own ctor path would
                  * have primed. Each is (address, value, why). */
                 struct TJInit { uint32_t addr, value; const char* why; };
+                /* GCM control block (put/get/ref). The Oct-17 pin lays it at
+                 * 0x03002000; ps3recomp master (v0.19.0) at 0x20002000. */
+                const uint32_t TJ_GCM_CTRL = [] {
+                    const char* e = getenv("TJ_GCM_CTRL");
+                    if (e && *e) return (uint32_t)strtoul(e, nullptr, 0);
+                    return 0x20002000u;
+                }();
                 static const TJInit k_init[] = {
                     /* The tick ring the pump (func_001F2D88) publishes into and
                      * then waits on. func_001F73CC appends an 8-byte entry at
@@ -839,7 +846,7 @@ int main(int argc, char* argv[])
                     {0x00C0475Cu, 0x0000800Fu, "tick ring object at 0x00C0475C: capacity word (42-frame run)"},
                     {0x00C04760u, 0x00000000u, "tick ring: end of record area (0 = ring is the object itself)"},
                     {0x00C04764u, 0x00000000u, "tick ring: write pointer / processed counter"},
-                    {0x03002008u, 0x00000080u,
+                    {TJ_GCM_CTRL + 0x8u, 0x00000080u,
                      "tick ring write index (ring object at 0x03002000 = the GCM control block)"},
                     /* The consumer's processed-ticket counter. func_001F734C
                      * publishes a ticket (0, then 0xFFFFFFFF = -1, signed) and
@@ -889,9 +896,9 @@ int main(int argc, char* argv[])
                          * this says whether the drain and fence publication
                          * are advancing at all. */
                         static uint32_t last_ref = 0xFFFFFFFF, last_put = 0;
-                        const uint32_t put = vm_read32(0x03002000u);
-                        const uint32_t get = vm_read32(0x03002004u);
-                        const uint32_t ref = vm_read32(0x03002008u);
+                        const uint32_t put = vm_read32(TJ_GCM_CTRL);
+                        const uint32_t get = vm_read32(TJ_GCM_CTRL + 4u);
+                        const uint32_t ref = vm_read32(TJ_GCM_CTRL + 8u);
                         if (ref != last_ref || put != last_put)
                             fprintf(stderr,
                                     "[ref] frame=%llu put=%08X get=%08X ref=%08X\n",

@@ -101,6 +101,23 @@ extern "C" int  rsx_null_backend_pump_messages(void);
 static volatile int s_window_alive = 1;
 extern "C" int tj_window_alive(void) { return s_window_alive; }
 
+/* Present on every tick, not only on a flip.
+ *
+ * The title flips rarely while it boots, so a flip-driven present leaves the
+ * window (and PS3RECOMP_VK_DUMP's PPM) showing whatever the first frame left
+ * behind. Presenting the offscreen target again is cheap and makes each
+ * screenshot show the current state. TJ_PRESENT_ALWAYS=0 keeps the old
+ * behaviour. */
+static int tj_present_always(void)
+{
+    static int cached = -1;
+    if (cached < 0) {
+        const char* e = getenv("TJ_PRESENT_ALWAYS");
+        cached = (e && e[0] == '0') ? 0 : 1;
+    }
+    return cached;
+}
+
 static DWORD WINAPI tj_present_thread(LPVOID)
 {
     const char* title = getenv("PS3_TITLE");
@@ -183,7 +200,7 @@ static DWORD WINAPI tj_present_thread(LPVOID)
                     }
                 }
             }
-            if (rsx_ok && cellGcm_take_flip_pending())
+            if (rsx_ok && (cellGcm_take_flip_pending() || tj_present_always()))
                 rsx_backend_present();
             if (rsx_ok)
                 cellGcm_rsx_process_fifo();
@@ -199,7 +216,7 @@ static DWORD WINAPI tj_present_thread(LPVOID)
         tj_dump_threads();
 
         if (rsx_ok) {
-            if (cellGcm_take_flip_pending())
+            if (cellGcm_take_flip_pending() || tj_present_always())
                 rsx_backend_present();
             cellGcm_rsx_process_fifo();
             if (rsx_backend_pump() != 0) {
@@ -210,8 +227,7 @@ static DWORD WINAPI tj_present_thread(LPVOID)
     }
 }
 
-extern "C" void tj_start_present_thread(void)
-{
+extern "C" void tj_start_present_thread(void){
     if (getenv("TJ_NO_PRESENT")) {
         printf("[TJ] TJ_NO_PRESENT: no present thread (headless)\n");
         return;

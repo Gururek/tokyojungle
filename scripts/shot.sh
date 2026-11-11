@@ -8,7 +8,7 @@ set -euo pipefail
 out="${1:?usage: scripts/shot.sh out.png [width]}"
 w="${2:-900}"
 cd "$(dirname "$0")/.."
-id=$(DISPLAY=:0 .venv/bin/python scripts/wininfo.py --id)
+id=$(DISPLAY=:0 .venv/bin/python scripts/wininfo.py --id "${TJ_WIN:-ps3recomp}")
 DISPLAY=:0 import -window "$id" logs/_shot_raw.png
 magick logs/_shot_raw.png -resize "${w}x" "$out"
 echo "captured $(du -h logs/_shot_raw.png | cut -f1) -> $out (window $id)"
