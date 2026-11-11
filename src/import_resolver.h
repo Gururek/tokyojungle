@@ -56,7 +56,7 @@ struct HleHeapBlock {
     uint32_t size;
     bool free;
 };
-static constexpr uint32_t HLE_HEAP_MAX_BLOCKS = 65536;
+static constexpr uint32_t HLE_HEAP_MAX_BLOCKS = 1u << 20;
 static HleHeapBlock g_heap_blocks[HLE_HEAP_MAX_BLOCKS];
 static uint32_t g_heap_block_count = 0;
 static std::mutex g_heap_mutex;
@@ -166,8 +166,26 @@ uint32_t hle_memalign(uint32_t align, uint32_t size) {
 void hle_free(uint32_t addr) {
     if (!addr || !g_heap_inited) return;
     std::lock_guard<std::mutex> lock(g_heap_mutex);
-    for (uint32_t i = 0; i < g_heap_block_count; i++) {
-        if (g_heap_blocks[i].addr != addr || g_heap_blocks[i].free) continue;
+    /* Blocks are kept in address order, so find this one by binary search on
+     * the start address. A linear scan here costs the whole block table on
+     * every free, and the title frees thousands of small blocks a frame. */
+    uint32_t lo = 0, hi = g_heap_block_count;
+    uint32_t i = g_heap_block_count;
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2;
+        if (g_heap_blocks[mid].addr == addr) { i = mid; break; }
+        if (g_heap_blocks[mid].addr < addr) lo = mid + 1;
+        else hi = mid;
+    }
+    if (i >= g_heap_block_count) {
+        /* Not a block start (the guest freed an interior pointer): fall back
+         * to the scan, which tolerates the odd unsorted entry. */
+        for (uint32_t k = 0; k < g_heap_block_count; k++)
+            if (g_heap_blocks[k].addr == addr && !g_heap_blocks[k].free) { i = k; break; }
+        if (i >= g_heap_block_count) return;
+    }
+    if (g_heap_blocks[i].free) return;
+    {
         g_heap_blocks[i].free = true;
         if (i > 0 && g_heap_blocks[i - 1].free &&
             g_heap_blocks[i - 1].addr + g_heap_blocks[i - 1].size == g_heap_blocks[i].addr) {
@@ -184,7 +202,6 @@ void hle_free(uint32_t addr) {
                     (g_heap_block_count - i - 2) * sizeof(HleHeapBlock));
             g_heap_block_count--;
         }
-        return;
     }
 }
 

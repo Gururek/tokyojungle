@@ -123,6 +123,16 @@ static DWORD WINAPI tj_present_thread(LPVOID)
     const char* title = getenv("PS3_TITLE");
     if (!title || !*title) title = "Tokyo Jungle (ps3recomp)";
 
+#if defined(PS3RECOMP_RSX_VULKAN) && !defined(_WIN32)
+    /* The Vulkan backend renders offscreen by default and only creates a
+     * window when PS3RECOMP_VK_WINDOW is set; the null/GL backend always
+     * created one.  Set it so both trees show their window. */
+    if (!getenv("PS3RECOMP_VK_WINDOW")) setenv("PS3RECOMP_VK_WINDOW", "1", 0);
+    /* SDL reports "x11 not available" when DISPLAY is unset, which is how a
+     * background run starts, and the run then looks headless. */
+    if (!getenv("DISPLAY")) setenv("DISPLAY", ":0", 0);
+#endif
+
     int rsx_ok = (rsx_backend_init(1280, 720, title) == 0);
     fprintf(stderr, "[rsx] " RSX_BACKEND_NAME " backend init %s\n",
             rsx_ok ? "OK -- window open" : "FAILED");
