@@ -15,6 +15,7 @@
 #include <cstring>
 #include "ppu_thread_exit_signal.h"
 #include "sys_ppu_thread.h"
+#include "tj_sysutil.h"
 
 static constexpr uint32_t TJ_CELL_ENOSYS = 0x80010003u;
 
@@ -435,14 +436,19 @@ static void hle_gcm_map_ea_io(ppu_context* ctx) {
 }
 
 // --- cellSysutil ---
+// The title's screen pump services these events every step (src/tj_sysutil.cpp
+// is the queue + dispatcher): register remembers the callback OPD, check
+// dispatches one queued event and reports whether a callback ran.
 static void hle_sysutil_reg_cb(ppu_context* ctx) {
-    printf("[HLE] cellSysutilRegisterCallback(slot=%u, func=0x%08X)\n",
-           (uint32_t)ctx->gpr[3], (uint32_t)ctx->gpr[4]);
+    const uint32_t slot = (uint32_t)ctx->gpr[3];
+    tj_sysutil_register((int)slot, (uint32_t)ctx->gpr[4], (uint32_t)ctx->gpr[5]);
+    printf("[HLE] cellSysutilRegisterCallback(slot=%u, func=0x%08X)\n", slot,
+           (uint32_t)ctx->gpr[4]);
     ctx->gpr[3] = 0;
 }
 
 static void hle_sysutil_check_cb(ppu_context* ctx) {
-    ctx->gpr[3] = 0; // No pending callbacks
+    ctx->gpr[3] = tj_sysutil_check(ctx) ? 0x80020001u /*CELL_SYSUTIL_ERROR_BUSY*/ : 0;
 }
 
 static void hle_sysutil_get_param_int(ppu_context* ctx) {

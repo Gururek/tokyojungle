@@ -14,6 +14,7 @@
 #include <windows.h>
 #else
 #include <signal.h>
+#include <time.h>
 #include <unistd.h>
 #include <sys/mman.h>
 #include "platform/win32_compat.h"   /* Sleep/GetTickCount64 used by the scaffold */
@@ -53,6 +54,7 @@ int g_hle_dispatch_count = 0;
 
 // HLE import handlers (cellGcm, malloc, thread, etc.)
 #include "hle_imports.h"
+#include "tj_sysutil.h"
 
 // The lifter's function_table[] (generated/ppu_recomp.h) is the single source
 // of truth for guest addr -> host body. It is emitted in ascending address
@@ -166,6 +168,12 @@ static void tj_install_posix_signals(void)
     sigaction(SIGBUS, &sa, NULL);
 }
 #endif /* !_WIN32 */
+
+static uint64_t tj_host_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000ull + (uint64_t)(ts.tv_nsec / 1000000);
+}
 
 int main(int argc, char* argv[])
 {
@@ -799,23 +807,69 @@ int main(int argc, char* argv[])
                 unsigned long long max_frames = getenv("TJ_MAX_FRAMES")
                     ? strtoull(getenv("TJ_MAX_FRAMES"), nullptr, 0) : 0ull;
                 unsigned long long frame = 0;
+                tj_sysutil_boot_events();  /* slot 2: boot event 0/6 (README) */
+                /* Guest globals that the boot sequence's own ctor path would
+                 * have primed. Each is (address, value, why). */
+                struct TJInit { uint32_t addr, value; const char* why; };
+                static const TJInit k_init[] = {
+                    /* The tick ring the pump (func_001F2D88) publishes into and
+                     * then waits on. func_001F73CC appends an 8-byte entry at
+                     * the write index and does `write_index += 8`; the pump's
+                     * target ticket is 0xFFFFFFFF, so the write index must
+                     * START 8 below it. Left at 0 the pump spins forever on the
+                     * GCM ref register (0x03002008). */
+                    {0x03002008u, 0x80000000u,
+                     "tick ring write index ([0x00C0475C]=0x03002000, +8 = GCM ref); the second ticket is signed -1, so the write index is a signed counter: 0x80000000 satisfies both tickets"},
+                };
+                for (const auto& p : k_init) {
+                    vm_write32(p.addr, p.value);
+                    fprintf(stderr, "[TJ] init [%08X] = %08X  (%s)\n", p.addr,
+                            p.value, p.why);
+                }
+                /* Frame pacing is the thing to watch here: the pump's tick
+                 * consumer (func_001F734C) sleeps 30 us per poll while it
+                 * waits for the tick producer, so one line per frame shows
+                 * how much of the wall clock a frame spends in guest code. */
+                const int flog = getenv("TJ_FRAME_LOG") ? atoi(getenv("TJ_FRAME_LOG")) : 0;
+                const uint64_t t_begin = tj_host_ms();
+                uint64_t t_last = t_begin;
                 while (pump && tj_window_alive() &&
                        (max_frames == 0ull || frame < max_frames)) {
                     g_main_ctx.gpr[3] = 1;
                     g_main_ctx.gpr[4] = 0x00F00000u;   /* ARGV_BASE */
                     pump(&g_main_ctx);
+                    const uint64_t t_pump = tj_host_ms();
                     while (g_trampoline_fn) {
                         void (*tf)(void*) = g_trampoline_fn;
                         g_trampoline_fn = 0;
                         tf(&g_main_ctx);
                     }
                     frame++;
-                    if (getenv("TJ_FRAME_LOG") &&
-                        (frame == 1 || (frame % 60) == 0))
+                    if (getenv("TJ_REFWATCH")) {
+                        /* GCM control register: put / get / ref (gcmRef). The
+                         * pump's per-frame waits end on the ref register, so
+                         * this says whether the drain and fence publication
+                         * are advancing at all. */
+                        static uint32_t last_ref = 0xFFFFFFFF, last_put = 0;
+                        const uint32_t put = vm_read32(0x03002000u);
+                        const uint32_t get = vm_read32(0x03002004u);
+                        const uint32_t ref = vm_read32(0x03002008u);
+                        if (ref != last_ref || put != last_put)
+                            fprintf(stderr,
+                                    "[ref] frame=%llu put=%08X get=%08X ref=%08X\n",
+                                    frame, put, get, ref);
+                        last_ref = ref; last_put = put;
+                    }
+                    if (flog && (frame == 1 || (frame % (uint64_t)flog) == 0))
                         fprintf(stderr,
-                                "[frame] %llu frames, r3=0x%llX, ticks=%llu\n",
-                                frame, (unsigned long long)g_main_ctx.gpr[3],
-                                (unsigned long long)vm_read32(0x00C0475Cu + 8));
+                                "[frame] %llu ticks=%llu pump=%llums d=%llums r3=0x%llX "
+                                "elapsed=%llums\n", frame,
+                                (unsigned long long)vm_read32(0x00C0475Cu + 8),
+                                (unsigned long long)(t_pump - t_last),
+                                (unsigned long long)(t_pump - t_last),
+                                (unsigned long long)g_main_ctx.gpr[3],
+                                (unsigned long long)(t_pump - t_begin));
+                    t_last = t_pump;
                 }
                 if (frame)
                     printf("[TJ] frame loop finished after %llu frame(s)\n", frame);

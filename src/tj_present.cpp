@@ -135,6 +135,25 @@ static DWORD WINAPI tj_present_thread(LPVOID)
 
             cellGcmTickVBlank();
             cellGcmTickFlip();
+            /* Host-side tick publisher. The JP disc's screen pump (func_001F2D88)
+             * publishes a request into a tick ring and then waits until the
+             * ring's write index (0x00C0475C+8) passes the request's ticket; the
+             * producer of that index is the game's tick source, which on
+             * hardware is driven by the GCM vblank. Nothing wrote it here, so
+             * every pump parked on the GCM ref register. Advance one ring entry
+             * per ~16 ms tick, which is the hardware cadence. */
+            {
+                static uint32_t tick_ea = 0;
+                static int init = 0;
+                if (!init) {
+                    const char* e = getenv("TJ_TICKRING");
+                    tick_ea = e ? (uint32_t)strtoul(e, NULL, 0)
+                                : 0x03002008u;   /* GCM ref == the ring object at 0x03002000, +8 */
+                    init = 1;
+                }
+                if (tick_ea)
+                    vm_write32(tick_ea, 0x80000000u);
+            }
             if (rsx_ok && cellGcm_take_flip_pending())
                 rsx_backend_present();
             if (rsx_ok)

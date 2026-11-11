@@ -303,6 +303,7 @@ add_executable(tokyojungle
     src/tj_prompt_text.cpp        # PC key names in game text (post_lift hook)
     src/tj_pamf_media.cpp
     src/tj_present.cpp
+    src/tj_sysutil.cpp
     src/tj_gcm_interrupt.cpp
     ${TJ_SPU_SOURCES}
     src/gen/ppu_hle_nids.cpp   # generated: NID -> ps3recomp lib handler
