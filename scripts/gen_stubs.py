@@ -116,6 +116,20 @@ def regen_header(src_path):
         prefix = prefix.rstrip() + '\n' + ('#ifdef __cplusplus\n}\n#endif\n'
                                           * (n_open - n_close)) + '\n'
 
+    # The VM accessors are function-like macros on the TJ_GENERATED_VM_FAST_ACCESS
+    # path, and this header is included *after* recomp_bridge.h defines them, so
+    # the declarations below get macro-expanded into prototypes the parser
+    # cannot read (`uint32_t (vm_read32)(uint64_t)` -> "expected ')'").
+    # Parenthesizing a declarator name is invisible to the compiler and immune
+    # to function-like macro expansion.  Only declarations: the header's own
+    # `#define vm_read32(a) ...` lines must keep the bare macro name, or the
+    # preprocessor reports "macro name must be an identifier".
+    prefix = '\n'.join(
+        re.sub(r'\b(vm_(?:read|write)(?:8|16|32|64)(?:_inl|_mm)?)\b(?=\s*\()',
+               r'(\1)', line)
+        if not line.lstrip().startswith('#define') else line
+        for line in prefix.split('\n'))
+
     content = ('/* Patched header */\n'
                '#pragma once\n'
                '#include "recomp_bridge.h"   /* ppu_context, func_entry, hle_dispatch_entry_t */\n'

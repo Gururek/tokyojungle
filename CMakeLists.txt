@@ -56,7 +56,13 @@ file(GLOB_RECURSE GENERATED_SOURCES CONFIGURE_DEPENDS
 # TJ_ENABLE_GENERATED_VM_FAST_ACCESS=OFF to retain runtime VM diagnostic hooks.
 file(GLOB GENERATED_PPU_SOURCES CONFIGURE_DEPENDS
     "${GENERATED_DIR}/ppu_recomp_*.cpp")
-if(TJ_ENABLE_GENERATED_VM_FAST_ACCESS AND WIN32 AND GENERATED_PPU_SOURCES)
+if(TJ_ENABLE_GENERATED_VM_FAST_ACCESS AND GENERATED_PPU_SOURCES)
+    # The lifted source defines vm_read32/vm_write32 as macros over the inline
+    # accessors; ps3recomp declares the extern prototypes first, so defining the
+    # macro makes every lifted memory access inline.  On the inlined path the
+    # units are ~40 MB and compile fast; the out-of-line path (the fallback with
+    # TJ_ENABLE_GENERATED_VM_FAST_ACCESS=OFF) produces ~140 MB units because the
+    # access is spelled out at every one of ~1M call sites.
     set_source_files_properties(${GENERATED_PPU_SOURCES} PROPERTIES
         COMPILE_DEFINITIONS TJ_GENERATED_VM_FAST_ACCESS)
     if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -70,17 +76,22 @@ if(TJ_ENABLE_GENERATED_VM_FAST_ACCESS AND WIN32 AND GENERATED_PPU_SOURCES)
         set_property(SOURCE ${GENERATED_PPU_SOURCES} APPEND PROPERTY
             COMPILE_OPTIONS ${TJ_GENERATED_PPU_COMPILE_OPTIONS})
     endif()
-    # GCC 16 segfaults (cc1plus signal 11) on a handful of these 40 MB
-    # translation units at -O3; -O2 compiles them in about half the time with no
-    # visible cost, because the app spends its time inside the lifted functions.
-    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        set_property(SOURCE ${GENERATED_PPU_SOURCES} APPEND PROPERTY
-            COMPILE_OPTIONS -O2)
-    endif()
     message(STATUS "generated PPU VM fast access: ON")
 else()
     message(STATUS "generated PPU VM fast access: OFF")
 endif()
+
+    # Optimization level for the lifted units, applied to BOTH compilers (a
+    # Release build defaults to -O3, the slowest thing in the tree).  Measured
+    # on a 138 MB lifted unit: -O3 ~6 min and crashes (GCC 16.2.1 segfaults in
+    # cc1plus on a rotating unit; clang 23 crashes in `function<eager-inv>` and
+    # `called-value-propagation`), -O2 ~4 min (clang still crashes in
+    # `called-value-propagation`), -O1 ~2 min and crashes on no unit.  The app
+    # spends its time inside these functions, so -O1 costs little at runtime.
+    set(TJ_GENERATED_PPU_OPT "-O1" CACHE STRING
+        "optimization level for the lifted ppu_recomp_*.cpp units")
+    set_property(SOURCE ${GENERATED_PPU_SOURCES} APPEND PROPERTY
+        COMPILE_OPTIONS ${TJ_GENERATED_PPU_OPT})
 
 if(NOT GENERATED_SOURCES)
     message(WARNING

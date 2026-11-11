@@ -123,14 +123,23 @@ black screen, so the pieces are recorded here:
 
 ## Build discipline
 
-- GCC 16.2.1 segfaults (cc1plus signal 11) on a rotating subset of the ~40 MB
-  lifted translation units. It is a memory-pressure symptom, not source-specific:
-  `scripts/ccbuild.sh` runs up to four ninja passes at decreasing `-j`, and ninja's
-  incremental state means a retry only recompiles what failed.
-- `generated/ppu_recomp_*.cpp` are compiled at `-O2` (see CMakeLists.txt) — half the
-  compile time and it sidesteps most of the ICEs.
-- 8 translation units (`scripts/gen_stubs.py --tus 8`) is the sweet spot: enough
-  parallelism to use the box, few enough 40 MB TUs that link+compile stay sane.
+- The lifted units get `TJ_GENERATED_VM_FAST_ACCESS` on every platform (the
+  CMakeLists.txt guard used to be WIN32-only).  With the inline VM accessors a
+  unit is ~40 MB and compiles in ~2 min; the out-of-line fallback spells the
+  access out at ~1M call sites and produces ~140 MB units, which is where the
+  long compiles came from.
+- Optimization is `TJ_GENERATED_PPU_OPT` (default **-O1**), applied to both
+  compilers.  Measured on a 138 MB unit: -O3 ~6 min and crashes, -O2 ~4 min
+  (clang dies in `called-value-propagation`), -O1 ~2 min and crashes on no unit.
+- GCC 16.2.1 segfaults (cc1plus signal 11) on a rotating subset of the units;
+  `scripts/ccbuild.sh` runs up to four ninja passes at decreasing `-j` and
+  ninja's incremental state recompiles only what failed.
+- 8 translation units (`scripts/gen_stubs.py --tus 8`) is the sweet spot.
 - Keep total ninja width ≤ 16: two concurrent builds (`build`, `build-vk`) at
-  -j16 each saturates the machine. `scripts/cbuild.sh` = a single low-`-j` pass,
-  for the side tree.
+  -j16 saturate the machine.  `scripts/cbuild.sh` = a single low-`-j` pass.
+- Daily driver is **build-clang** (clang 23): `cmake -B build-clang -G Ninja
+  -DCMAKE_BUILD_TYPE=Release -DPS3RECOMP_RSX_VULKAN=OFF
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_C_COMPILER=clang
+  -DCMAKE_CXX_COMPILER=clang++`, then `scripts/bgtask.sh work-A
+  scripts/work.sh work-A` (build + run batches, one row in the ledger,
+  `scripts/bgstatus.sh` says RUNNING/STALE/OK/FAIL).

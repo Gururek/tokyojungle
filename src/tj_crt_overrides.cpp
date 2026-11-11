@@ -26,6 +26,9 @@
 #else
 #include "platform/win32_compat.h"   /* LONG/EXCEPTION_EXECUTE_HANDLER and friends */
 #include <execinfo.h>                /* backtrace() for tj_capture_bt */
+#ifndef _WIN32
+#include <dlfcn.h>                   /* dladdr()/dli_fbase for tj_image_base */
+#endif
 #endif
 #include <string.h>
 #include <map>
@@ -1426,6 +1429,27 @@ void tj_heap_realloc(ppu_context* ctx)
  */
 extern "C" void ppu_dump_guest_stack(ppu_context* ctx, const char* tag);
 
+/* Load base of the executable, so trace addresses are readable.  The build is
+ * PIE, so a raw return address carries the ASLR slide: printed as-is it reads
+ * 0xFFFFFFFFFDB20CD0 and cannot be fed to addr2line.  Windows gets it from the
+ * shim's GetModuleHandleA(NULL); POSIX from dladdr() on a symbol we know lives
+ * in the main program (dli_fbase). */
+static uintptr_t tj_image_base(void)
+{
+#ifdef _WIN32
+    return (uintptr_t)GetModuleHandleA(NULL);
+#else
+    static uintptr_t base = 0;
+    if (base == 0) {
+        Dl_info info;
+        memset(&info, 0, sizeof(info));
+        if (dladdr((void*)&tj_image_base, &info) && info.dli_fbase)
+            base = (uintptr_t)info.dli_fbase;
+    }
+    return base;
+#endif
+}
+
 /* The HOST stack is the guest call chain: lifted functions call each other
  * directly, so a host return address inside func_XXXXXXXX's body identifies
  * that guest function. Resolve each frame to the entry whose body address is
@@ -1564,8 +1588,7 @@ extern "C" int tj_crash_filter(unsigned long code, void* exception_info)
     for (unsigned short i = 0; i < n; i++) {
         if (i < 24)
             fprintf(stderr, "      host_rva=0x%llX\n",
-                    (unsigned long long)((uintptr_t)bt[i] -
-                                         (uintptr_t)GetModuleHandleA(NULL)));
+                    (unsigned long long)((uintptr_t)bt[i] - tj_image_base()));
         uintptr_t off = 0;
         uint32_t g = tj_guest_of_host_ra((uintptr_t)bt[i], &off);
         if (g && off < 0x4000)

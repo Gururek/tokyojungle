@@ -13,13 +13,26 @@
 set -uo pipefail
 BATCH=${1:?usage: experiments.sh <batch-name> "<tag:env>" ...}
 shift
+BIN=${BIN:-build-clang/tokyojungle}
+[ -x "$BIN" ] || { echo "experiments: no binary at $BIN - build first" >&2; exit 1; }
 OUT=logs/experiments-$BATCH.log
 : > "$OUT"
+fails=0
 for spec in "$@"; do
     tag=${spec%%:*}
     env_spec=${spec#*:}
     echo "##### run-$tag  env='$env_spec'" >> "$OUT"
     # shellcheck disable=SC2086
-    scripts/runexp.sh "$tag" $env_spec >> "$OUT" 2>&1
+    scripts/runexp.sh "$tag" $env_spec >> "$OUT" 2>&1 || fails=$((fails + 1))
 done
-echo "batch $BATCH done" >> "$OUT"
+# A run that produced no boot banner is a failed run, not a result.
+for spec in "$@"; do
+    tag=${spec%%:*}
+    grep -aq '\[TJ\]' "logs/run-$tag.log" 2>/dev/null || {
+        echo "run-$tag: no boot output (binary crashed on start?)" >> "$OUT"
+        fails=$((fails + 1))
+    }
+done
+echo "batch $BATCH done ($fails failure(s))" >> "$OUT"
+[ "$fails" -eq 0 ]
+
