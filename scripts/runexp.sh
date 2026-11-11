@@ -15,7 +15,7 @@
 # 25), FRAMES/FLOG/TICK_US, BIN (default build/tokyojungle), SHOT=0 to skip.
 set -uo pipefail
 TAG=${1:?usage: runexp.sh <tag> [env ...]}; shift
-BIN=${BIN:-build-clang/tokyojungle}
+BIN=${BIN:-build/tokyojungle}
 DUR=${DUR:-60}
 LOG=logs/run-$TAG.log
 [ -x "$BIN" ] || { echo "runexp: no binary at $BIN - build first" >&2; exit 1; }

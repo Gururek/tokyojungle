@@ -820,7 +820,16 @@ int main(int argc, char* argv[])
                      * GCM ref register (0x03002008). */
                     /* The GCM control block IS the tick ring: [0x00C0475C] =
                      * 0x03002000, and the producer (func_001F73CC) writes its
-                     * entries at [obj+8] = 0x03002008. */
+                     * entries at [obj+8] = 0x03002008.  With the inline VM
+                     * accessors the pump reaches the consumer before that
+                     * pointer is published, so prime it here: the probe printed
+                     * obj=00000000 in run-141 and obj=03002000 in the older
+                     * out-of-line build. */
+                    /* 0x00C0475C is the ring OBJECT (its first word is the
+                     * capacity, 0x0000800F), not a pointer to it - priming it
+                     * with 0x03002000 gave `malloc(): unaligned tcache chunk`
+                     * as the next allocation used that as a size. */
+                    {0x00C0475Cu, 0x0000800Fu, "tick ring capacity (the ring object's first word)"},
                     {0x03002008u, 0x00000080u,
                      "tick ring write index (ring object at 0x03002000 = the GCM control block)"},
                     /* The consumer's processed-ticket counter. func_001F734C
